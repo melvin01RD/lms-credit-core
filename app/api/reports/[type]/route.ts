@@ -17,6 +17,9 @@ import { generatePdfReport, PdfReportType } from '@/lib/services/pdf-report.serv
 import { getCarteraVigente } from '@/lib/services/cartera-vigente.service';
 import { generateCarteraVigentePDF } from '@/lib/reports/cartera-vigente';
 import { generateCarteraVigenteExcel } from '@/lib/reports/cartera-vigente-excel';
+import { getCarteraMora } from '@/lib/services/cartera-mora.service';
+import { generateCarteraMoraPDF } from '@/lib/reports/cartera-mora';
+import { generateCarteraMoraExcel } from '@/lib/reports/cartera-mora-excel';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,6 +76,34 @@ export const GET = withAuth(async (req, context) => {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': `attachment; filename="Cartera_Vigente_${timestamp}.xlsx"`,
+        'Content-Length': buffer.length.toString(),
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+      },
+    });
+  }
+
+  if (reportType === 'cartera-mora') {
+    const data = await getCarteraMora();
+    const buffer = await generateCarteraMoraPDF(data);
+    return new NextResponse(new Uint8Array(buffer), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `inline; filename="Cartera_Mora_${timestamp}.pdf"`,
+        'Content-Length': buffer.length.toString(),
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+      },
+    });
+  }
+
+  if (reportType === 'cartera-mora-excel') {
+    const data = await getCarteraMora();
+    const buffer = await generateCarteraMoraExcel(data);
+    return new NextResponse(new Uint8Array(buffer), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="Cartera_Mora_${timestamp}.xlsx"`,
         'Content-Length': buffer.length.toString(),
         'Cache-Control': 'no-cache, no-store, must-revalidate',
       },
