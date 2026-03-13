@@ -31,6 +31,7 @@ export const POST = withAuth(async (req) => {
     );
   }
 
-  const loan = await createLoan({ ...body, loanStructure: "FLAT_RATE" });
+  const loanStatus = body.status === 'DRAFT' ? 'DRAFT' : undefined;
+  const loan = await createLoan({ ...body, loanStructure: "FLAT_RATE", status: loanStatus });
   return NextResponse.json(loan, { status: 201 });
 });

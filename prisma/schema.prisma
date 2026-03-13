@@ -18,6 +18,7 @@ enum UserRole {
 }
 
 enum LoanStatus {
+  DRAFT         // borrador — pendiente de activación
   ACTIVE        // al día
   OVERDUE       // en mora
   PAID          // totalmente pagado
@@ -115,6 +116,12 @@ model Loan {
   nextDueDate        DateTime?
   status             LoanStatus       @default(ACTIVE)
   guarantees         String?
+
+  // Flujo de aprobación con token público
+  approvalToken    String?   @unique
+  approvalTokenExp DateTime?
+  approvedAt       DateTime?
+  approvedByName   String?
 
   client          Client           @relation(fields: [clientId], references: [id])
   payments        Payment[]
@@ -215,4 +222,17 @@ model AuditLog {
   entityId   String   // el UUID del registro afectado
   details    Json?    // snapshot de los datos relevantes
   createdAt  DateTime @default(now())
+}
+
+model LoanProduct {
+  id               String           @id @default(uuid())
+  name             String
+  defaultRate      Decimal          @db.Decimal(5, 2)
+  paymentFrequency PaymentFrequency
+  termCount        Int
+  minAmount        Decimal?         @db.Decimal(12, 2)
+  maxAmount        Decimal?         @db.Decimal(12, 2)
+  active           Boolean          @default(true)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 }

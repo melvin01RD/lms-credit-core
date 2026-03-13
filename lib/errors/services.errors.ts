@@ -126,3 +126,25 @@ export class InvalidPaymentAmountError extends ServiceError {
     super(message, "INVALID_PAYMENT_AMOUNT", 400);
   }
 }
+
+// ============================================
+// APPROVAL TOKEN ERRORS
+// ============================================
+
+export class TokenNotFoundError extends ServiceError {
+  constructor() {
+    super("Este enlace no existe o no es válido", "TOKEN_INVALID", 404);
+  }
+}
+
+export class TokenExpiredError extends ServiceError {
+  constructor() {
+    super("Este enlace ha expirado. Solicita un nuevo enlace al gestor de tu préstamo", "TOKEN_EXPIRED", 410);
+  }
+}
+
+export class TokenAlreadyUsedError extends ServiceError {
+  constructor() {
+    super("Este préstamo ya fue procesado anteriormente", "TOKEN_USED", 410);
+  }
+}

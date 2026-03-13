@@ -41,6 +41,14 @@ interface PaginatedLoans {
   };
 }
 
+interface LoanProduct {
+  id: string;
+  name: string;
+  defaultRate: string;
+  paymentFrequency: string;
+  termCount: number;
+}
+
 // ============================================
 // CONSTANTS
 // ============================================
@@ -572,6 +580,9 @@ function CreateLoanModal({
   const [selectedClient, setSelectedClient] = useState<SearchClient | null>(null);
   const [searchingClients, setSearchingClients] = useState(false);
 
+  const [products, setProducts] = useState<LoanProduct[]>([]);
+  const [selectedProductId, setSelectedProductId] = useState("");
+
   const [form, setForm] = useState({
     principalAmount: "",
     totalFinanceCharge: "",
@@ -583,6 +594,14 @@ function CreateLoanModal({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  // Fetch active loan products
+  useEffect(() => {
+    fetch("/api/loan-products")
+      .then((r) => r.ok ? r.json() : [])
+      .then(setProducts)
+      .catch(() => {});
+  }, []);
 
   // Search clients with debounce
   useEffect(() => {
@@ -610,7 +629,39 @@ function CreateLoanModal({
   }, [clientSearch]);
 
   function updateField(field: string, value: string) {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      const updated = { ...prev, [field]: value };
+      // When principal changes and a product is selected, auto-calc charge
+      if (field === "principalAmount" && selectedProductId) {
+        const product = products.find((p) => p.id === selectedProductId);
+        if (product) {
+          const principal = parseFloat(value);
+          updated.totalFinanceCharge =
+            !isNaN(principal) && principal > 0
+              ? String((principal * Number(product.defaultRate) / 100).toFixed(2))
+              : "";
+        }
+      }
+      return updated;
+    });
+  }
+
+  function handleProductSelect(productId: string) {
+    setSelectedProductId(productId);
+    if (!productId) return;
+    const product = products.find((p) => p.id === productId);
+    if (!product) return;
+    const principal = parseFloat(form.principalAmount);
+    const charge =
+      !isNaN(principal) && principal > 0
+        ? String((principal * Number(product.defaultRate) / 100).toFixed(2))
+        : form.totalFinanceCharge;
+    setForm((prev) => ({
+      ...prev,
+      paymentFrequency: product.paymentFrequency,
+      termCount: String(product.termCount),
+      totalFinanceCharge: charge,
+    }));
   }
 
   // Calculate estimated installment (client-side preview)
@@ -787,6 +838,31 @@ function CreateLoanModal({
               <span className="field-error" role="alert">{fieldErrors.client}</span>
             )}
           </div>
+
+          {/* Product selector */}
+          {products.length > 0 && (
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="form-label" htmlFor="loanProduct">Producto Crediticio (opcional)</label>
+              <select
+                id="loanProduct"
+                className="form-input form-select"
+                value={selectedProductId}
+                onChange={(e) => handleProductSelect(e.target.value)}
+              >
+                <option value="">Sin plantilla</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {Number(p.defaultRate).toFixed(2)}% / {p.termCount} cuotas {FREQUENCY_LABELS[p.paymentFrequency]}
+                  </option>
+                ))}
+              </select>
+              {selectedProductId && (
+                <span style={{ fontSize: "0.75rem", color: "#6b7280", marginTop: 3 }}>
+                  Condiciones pre-llenadas. Puedes editarlas libremente.
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Loan fields */}
           <div className="form-row">

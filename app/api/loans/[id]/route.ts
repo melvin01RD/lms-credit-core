@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api/auth-middleware";
-import { getLoanById, cancelLoan, markLoanAsOverdue } from "@/lib/services";
+import { getLoanById, cancelLoan, markLoanAsOverdue, deleteDraftLoan } from "@/lib/services";
 
 export const dynamic = 'force-dynamic';
 
@@ -37,4 +37,19 @@ export const PATCH = withAuth(async (req, context) => {
   }
 
   return NextResponse.json(result);
+});
+
+export const DELETE = withAuth(async (req, context) => {
+  const params = await context!.params;
+  const { userId } = await req.json();
+
+  if (!userId) {
+    return NextResponse.json(
+      { error: { code: "MISSING_USER_ID", message: "userId es requerido" } },
+      { status: 400 }
+    );
+  }
+
+  await deleteDraftLoan(params.id, userId);
+  return new NextResponse(null, { status: 204 });
 });

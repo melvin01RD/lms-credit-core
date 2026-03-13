@@ -1,8 +1,13 @@
+import { randomUUID } from "crypto";
 import { prisma } from "../db/prisma";
 import { LoanStatus, LoanStructure, PaymentFrequency, ScheduleStatus, Prisma } from "@prisma/client";
 import {
   LoanNotFoundError,
   PaymentNotAllowedError,
+  ServiceError,
+  TokenNotFoundError,
+  TokenExpiredError,
+  TokenAlreadyUsedError,
 } from "../errors";
 import {
   calculateFlatRateLoan,
@@ -24,6 +29,7 @@ export interface CreateLoanInput {
   termCount: number;
   createdById: string;
   guarantees?: string;
+  status?: 'DRAFT';             // si se pasa 'DRAFT', el préstamo no genera schedule
   // loanStructure es ignorado — siempre FLAT_RATE
   loanStructure?: string;
 }
@@ -76,6 +82,8 @@ async function createPaymentScheduleInTx(
  * El cargo financiero es fijo desde el día 1.
  */
 export async function createLoan(data: CreateLoanInput) {
+  const isDraft = data.status === 'DRAFT';
+
   const calc = calculateFlatRateLoan({
     principalAmount: data.principalAmount,
     totalFinanceCharge: data.totalFinanceCharge,
@@ -84,7 +92,8 @@ export async function createLoan(data: CreateLoanInput) {
     startDate: new Date(),
   });
 
-  const nextDueDate = calc.schedule[0]?.dueDate ?? null;
+  // Los borradores no tienen fecha de vencimiento ni schedule activo
+  const nextDueDate = isDraft ? null : (calc.schedule[0]?.dueDate ?? null);
 
   const loan = await prisma.$transaction(async (tx) => {
     const newLoan = await tx.loan.create({
@@ -101,7 +110,7 @@ export async function createLoan(data: CreateLoanInput) {
         remainingCapital: calc.totalPayableAmount,
         installmentsPaid: 0,
         nextDueDate,
-        status: LoanStatus.ACTIVE,
+        status: isDraft ? LoanStatus.DRAFT : LoanStatus.ACTIVE,
         guarantees: data.guarantees,
         createdById: data.createdById,
       },
@@ -111,13 +120,17 @@ export async function createLoan(data: CreateLoanInput) {
       },
     });
 
-    await createPaymentScheduleInTx(tx, newLoan.id, calc.schedule);
+    // Solo los préstamos ACTIVE generan PaymentSchedule
+    if (!isDraft) {
+      await createPaymentScheduleInTx(tx, newLoan.id, calc.schedule);
+    }
 
     return newLoan;
   });
 
   await auditLog(data.createdById, AuditAction.CREATE_LOAN, AuditEntity.LOAN, loan.id, {
     loanStructure: "FLAT_RATE",
+    status: isDraft ? "DRAFT" : "ACTIVE",
     clientId: data.clientId,
     principalAmount: data.principalAmount,
     totalFinanceCharge: data.totalFinanceCharge,
@@ -128,6 +141,163 @@ export async function createLoan(data: CreateLoanInput) {
   });
 
   return loan;
+}
+
+/**
+ * Activa un préstamo DRAFT: genera el PaymentSchedule y lo pasa a ACTIVE.
+ * Solo puede ser llamado por un ADMIN.
+ */
+export async function activateLoan(loanId: string, userId: string) {
+  const loan = await prisma.loan.findUnique({ where: { id: loanId } });
+  if (!loan) throw new LoanNotFoundError(loanId);
+  if (loan.status !== LoanStatus.DRAFT) {
+    throw new Error(`Solo préstamos en borrador pueden activarse. Estado actual: ${loan.status}`);
+  }
+
+  const calc = calculateFlatRateLoan({
+    principalAmount: Number(loan.principalAmount),
+    totalFinanceCharge: Number(loan.totalFinanceCharge ?? 0),
+    termCount: loan.termCount,
+    paymentFrequency: loan.paymentFrequency,
+    startDate: new Date(),
+  });
+
+  const nextDueDate = calc.schedule[0]?.dueDate ?? null;
+
+  const activatedLoan = await prisma.$transaction(async (tx) => {
+    const updated = await tx.loan.update({
+      where: { id: loanId },
+      data: {
+        status: LoanStatus.ACTIVE,
+        nextDueDate,
+        updatedById: userId,
+      },
+      include: {
+        client: true,
+        createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+    });
+
+    await createPaymentScheduleInTx(tx, loanId, calc.schedule);
+
+    return updated;
+  });
+
+  await auditLog(userId, AuditAction.ACTIVATE_LOAN, AuditEntity.LOAN, loanId, {
+    previousStatus: "DRAFT",
+    nextDueDate,
+    installmentAmount: calc.installmentAmount,
+    termCount: loan.termCount,
+  });
+
+  return activatedLoan;
+}
+
+/**
+ * Elimina permanentemente un préstamo en estado DRAFT.
+ * No puede eliminar préstamos en otros estados.
+ */
+export async function deleteDraftLoan(loanId: string, userId: string) {
+  const loan = await prisma.loan.findUnique({ where: { id: loanId } });
+  if (!loan) throw new LoanNotFoundError(loanId);
+  if (loan.status !== LoanStatus.DRAFT) {
+    throw new Error(`Solo borradores pueden eliminarse. Estado actual: ${loan.status}`);
+  }
+
+  await auditLog(userId, AuditAction.DELETE_DRAFT_LOAN, AuditEntity.LOAN, loanId, {
+    clientId: loan.clientId,
+    principalAmount: Number(loan.principalAmount),
+    createdAt: loan.createdAt,
+  });
+
+  await prisma.loan.delete({ where: { id: loanId } });
+}
+
+/**
+ * Genera un token único de aprobación para un préstamo en DRAFT.
+ * El token expira en 24 horas. Solo ADMIN y OPERATOR pueden llamarlo.
+ */
+export async function generateApprovalToken(loanId: string, userId: string) {
+  const loan = await prisma.loan.findUnique({ where: { id: loanId } });
+  if (!loan) throw new LoanNotFoundError(loanId);
+  if (loan.status !== LoanStatus.DRAFT) {
+    throw new ServiceError(
+      `Solo préstamos en borrador pueden generar un token de aprobación. Estado actual: ${loan.status}`,
+      "LOAN_NOT_IN_DRAFT",
+      400
+    );
+  }
+
+  const token = randomUUID();
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 horas
+
+  await prisma.loan.update({
+    where: { id: loanId },
+    data: { approvalToken: token, approvalTokenExp: expiresAt },
+  });
+
+  await auditLog(userId, AuditAction.GENERATE_APPROVAL_TOKEN, AuditEntity.LOAN, loanId, {
+    expiresAt: expiresAt.toISOString(),
+  });
+
+  return { token, expiresAt };
+}
+
+/**
+ * Activa un préstamo vía token público firmado por el cliente.
+ * Genera el PaymentSchedule, invalida el token y registra la firma.
+ */
+export async function approveViaToken(token: string, clientSignature: string) {
+  if (!clientSignature?.trim()) {
+    throw new ServiceError("Debe ingresar su nombre completo para confirmar", "MISSING_SIGNATURE", 400);
+  }
+
+  const loan = await prisma.loan.findUnique({ where: { approvalToken: token } });
+  if (!loan) throw new TokenNotFoundError();
+
+  if (!loan.approvalTokenExp || loan.approvalTokenExp < new Date()) {
+    throw new TokenExpiredError();
+  }
+  if (loan.status !== LoanStatus.DRAFT) {
+    throw new TokenAlreadyUsedError();
+  }
+
+  const calc = calculateFlatRateLoan({
+    principalAmount: Number(loan.principalAmount),
+    totalFinanceCharge: Number(loan.totalFinanceCharge ?? 0),
+    termCount: loan.termCount,
+    paymentFrequency: loan.paymentFrequency,
+    startDate: new Date(),
+  });
+
+  const nextDueDate = calc.schedule[0]?.dueDate ?? null;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.loan.update({
+      where: { id: loan.id },
+      data: {
+        status: LoanStatus.ACTIVE,
+        nextDueDate,
+        approvedAt: new Date(),
+        approvedByName: clientSignature.trim(),
+        approvalToken: null,
+        approvalTokenExp: null,
+      },
+    });
+    await createPaymentScheduleInTx(tx, loan.id, calc.schedule);
+  });
+
+  await auditLog(loan.createdById, AuditAction.ACTIVATE_LOAN, AuditEntity.LOAN, loan.id, {
+    method: "CLIENT_APPROVAL_TOKEN",
+    clientSignature: clientSignature.trim(),
+    nextDueDate: nextDueDate?.toISOString() ?? null,
+  });
+
+  return {
+    clientName: clientSignature.trim(),
+    loanId: loan.id,
+    nextDueDate: nextDueDate?.toISOString() ?? null,
+  };
 }
 
 // ============================================
@@ -376,7 +546,7 @@ export async function processOverdueLoans(userId: string): Promise<{ affected: n
     data: { status: ScheduleStatus.OVERDUE },
   });
 
-  // Marcar los loans correspondientes
+  // Marcar los loans correspondientes (DRAFT excluido explícitamente)
   const result = await prisma.loan.updateMany({
     where: {
       status: LoanStatus.ACTIVE,

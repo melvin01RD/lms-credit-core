@@ -6,3 +6,4 @@ export * from "./reports.service";
 export * from "./pdf-report.service";
 export * from "./audit.service";
 export * from "./system-config.service";
+export * from "./loan-product.service";

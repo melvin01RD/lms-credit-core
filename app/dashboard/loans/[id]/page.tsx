@@ -56,6 +56,9 @@ interface LoanDetail {
   payments: Payment[];
   createdBy: LoanUser | null;
   updatedBy: LoanUser | null;
+  // Flujo de aprobación
+  approvalToken?: string | null;
+  approvalTokenExp?: string | null;
 }
 
 interface LoanSummary {
@@ -83,6 +86,7 @@ interface AmortizationEntry {
 // ============================================
 
 const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
+  DRAFT: { bg: "#fef3c7", color: "#d97706" },
   ACTIVE: { bg: "#d1fae5", color: "#059669" },
   OVERDUE: { bg: "#fee2e2", color: "#dc2626" },
   PAID: { bg: "#dbeafe", color: "#2563eb" },
@@ -90,6 +94,7 @@ const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
+  DRAFT: "Borrador",
   ACTIVE: "Activo",
   OVERDUE: "En mora",
   PAID: "Pagado",
@@ -124,14 +129,20 @@ export default function LoanDetailPage() {
   const [activeTab, setActiveTab] = useState<"info" | "payments" | "amortization">("info");
   const [loadingAmortization, setLoadingAmortization] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [draftAction, setDraftAction] = useState<"activating" | "deleting" | null>(null);
+  const [draftError, setDraftError] = useState("");
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
 
-  // Fetch loan + summary
+  // Fetch loan + summary + current user
   useEffect(() => {
     async function fetchLoan() {
       try {
-        const [loanRes, summaryRes] = await Promise.all([
+        const [loanRes, summaryRes, meRes] = await Promise.all([
           fetch(`/api/loans/${id}`),
           fetch(`/api/loans/${id}/summary`),
+          fetch(`/api/auth/me`),
         ]);
 
         if (!loanRes.ok) {
@@ -145,6 +156,12 @@ export default function LoanDetailPage() {
         if (summaryRes.ok) {
           const summaryData = await summaryRes.json();
           setSummary(summaryData.summary);
+        }
+
+        if (meRes.ok) {
+          const meData = await meRes.json();
+          setUserRole(meData.user?.role ?? null);
+          setUserId(meData.user?.userId ?? null);
         }
       } catch {
         setError("Error al cargar el préstamo");
@@ -199,7 +216,56 @@ export default function LoanDetailPage() {
   const fmt = (n: number) => n.toLocaleString("es-DO", { minimumFractionDigits: 2 });
   const sc = STATUS_COLORS[loan.status] || STATUS_COLORS.CANCELED;
   const clientName = `${loan.client.firstName} ${loan.client.lastName ?? ""}`.trim();
+  const isDraft = loan.status === "DRAFT";
   const canCancel = loan.status === "ACTIVE" || loan.status === "OVERDUE";
+  const isAdmin = userRole === "ADMIN";
+
+  async function handleActivate() {
+    if (!userId) return;
+    setDraftAction("activating");
+    setDraftError("");
+    try {
+      const res = await fetch(`/api/loans/${loan!.id}/activate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setDraftError(data.error?.message ?? "Error al activar el préstamo");
+        return;
+      }
+      setLoan({ ...loan!, status: "ACTIVE" });
+      router.refresh();
+    } catch {
+      setDraftError("Error de conexión");
+    } finally {
+      setDraftAction(null);
+    }
+  }
+
+  async function handleDeleteDraft() {
+    if (!userId) return;
+    setDraftAction("deleting");
+    setDraftError("");
+    try {
+      const res = await fetch(`/api/loans/${loan!.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setDraftError(data.error?.message ?? "Error al eliminar el borrador");
+        return;
+      }
+      router.push("/dashboard/loans");
+    } catch {
+      setDraftError("Error de conexión");
+    } finally {
+      setDraftAction(null);
+    }
+  }
 
   return (
     <div>
@@ -240,8 +306,54 @@ export default function LoanDetailPage() {
         </div>
       </div>
 
+      {/* DRAFT banner */}
+      {isDraft && (
+        <div className="draft-banner">
+          <div className="draft-banner-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+          </div>
+          <div className="draft-banner-content">
+            <p className="draft-banner-title">Préstamo en Borrador</p>
+            <p className="draft-banner-desc">Este préstamo aún no está activo. Debe ser activado para poder registrar pagos y generar el plan de cuotas.</p>
+          </div>
+          <div className="draft-banner-actions">
+            <button
+              className="btn-send-approval"
+              onClick={() => setShowApprovalModal(true)}
+              disabled={draftAction !== null}
+            >
+              Enviar para Aprobación
+            </button>
+            {isAdmin && (
+              <button
+                className="btn-activate"
+                onClick={handleActivate}
+                disabled={draftAction !== null}
+              >
+                {draftAction === "activating" ? "Activando..." : "Activar Préstamo"}
+              </button>
+            )}
+            <button
+              className="btn-delete-draft"
+              onClick={handleDeleteDraft}
+              disabled={draftAction !== null}
+            >
+              {draftAction === "deleting" ? "Eliminando..." : "Eliminar Borrador"}
+            </button>
+          </div>
+        </div>
+      )}
+      {draftError && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", padding: "10px 14px", color: "#dc2626", fontSize: "0.85rem", marginBottom: "16px" }}>
+          {draftError}
+        </div>
+      )}
+
       {/* Progress bar */}
-      {summary && (
+      {!isDraft && summary && (
         <div className="progress-section">
           <div className="progress-header">
             <span className="progress-label">Progreso de pago</span>
@@ -261,7 +373,7 @@ export default function LoanDetailPage() {
       )}
 
       {/* KPI cards */}
-      {summary && (
+      {!isDraft && summary && (
         <div className="kpi-grid">
           <div className="kpi-card">
             <span className="kpi-value">RD$ {fmt(summary.totalPaid)}</span>
@@ -300,28 +412,42 @@ export default function LoanDetailPage() {
         >
           Información
         </button>
-        <button
-          className={`tab ${activeTab === "payments" ? "active" : ""}`}
-          onClick={() => setActiveTab("payments")}
-        >
-          Pagos ({loan.payments.length})
-        </button>
-        <button
-          className={`tab ${activeTab === "amortization" ? "active" : ""}`}
-          onClick={() => setActiveTab("amortization")}
-        >
-          Amortización
-        </button>
+        {!isDraft && (
+          <button
+            className={`tab ${activeTab === "payments" ? "active" : ""}`}
+            onClick={() => setActiveTab("payments")}
+          >
+            Pagos ({loan.payments.length})
+          </button>
+        )}
+        {!isDraft && (
+          <button
+            className={`tab ${activeTab === "amortization" ? "active" : ""}`}
+            onClick={() => setActiveTab("amortization")}
+          >
+            Amortización
+          </button>
+        )}
       </div>
 
       {/* Tab content */}
       <div className="tab-content">
         {activeTab === "info" && <InfoTab loan={loan} />}
-        {activeTab === "payments" && <PaymentsTab payments={loan.payments} />}
-        {activeTab === "amortization" && (
+        {!isDraft && activeTab === "payments" && <PaymentsTab payments={loan.payments} />}
+        {!isDraft && activeTab === "amortization" && (
           <AmortizationTab entries={amortization} loading={loadingAmortization} />
         )}
       </div>
+
+      {/* Approval token modal */}
+      {showApprovalModal && (
+        <ApprovalTokenModal
+          loanId={loan.id}
+          existingToken={loan.approvalToken}
+          existingTokenExp={loan.approvalTokenExp}
+          onClose={() => setShowApprovalModal(false)}
+        />
+      )}
 
       {/* Cancel modal */}
       {showCancelModal && (
@@ -500,6 +626,88 @@ export default function LoanDetailPage() {
         .tab-content {
           padding-top: 20px;
         }
+
+        /* DRAFT banner */
+        .draft-banner {
+          display: flex;
+          align-items: flex-start;
+          gap: 14px;
+          background: #fffbeb;
+          border: 1px solid #fde68a;
+          border-radius: 12px;
+          padding: 16px 20px;
+          margin-bottom: 20px;
+          flex-wrap: wrap;
+        }
+        .draft-banner-icon {
+          flex-shrink: 0;
+          margin-top: 2px;
+        }
+        .draft-banner-content {
+          flex: 1;
+          min-width: 0;
+        }
+        .draft-banner-title {
+          font-size: 0.9rem;
+          font-weight: 700;
+          color: #92400e;
+          margin: 0 0 4px;
+        }
+        .draft-banner-desc {
+          font-size: 0.825rem;
+          color: #78350f;
+          margin: 0;
+          line-height: 1.5;
+        }
+        .draft-banner-actions {
+          display: flex;
+          gap: 10px;
+          align-items: center;
+          flex-shrink: 0;
+          flex-wrap: wrap;
+        }
+        .btn-send-approval {
+          background: white;
+          color: #6B21E8;
+          border: 1.5px solid #6B21E8;
+          border-radius: 8px;
+          padding: 9px 18px;
+          font-size: 0.85rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.15s;
+          white-space: nowrap;
+        }
+        .btn-send-approval:hover:not(:disabled) { background: #f5f3ff; }
+        .btn-send-approval:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-activate {
+          background: #6B21E8;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          padding: 9px 18px;
+          font-size: 0.85rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 0.15s;
+          white-space: nowrap;
+        }
+        .btn-activate:hover:not(:disabled) { background: #5b1dc4; }
+        .btn-activate:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-delete-draft {
+          background: white;
+          color: #dc2626;
+          border: 1px solid #fecaca;
+          border-radius: 8px;
+          padding: 9px 18px;
+          font-size: 0.85rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.15s;
+          white-space: nowrap;
+        }
+        .btn-delete-draft:hover:not(:disabled) { background: #fef2f2; border-color: #dc2626; }
+        .btn-delete-draft:disabled { opacity: 0.6; cursor: not-allowed; }
       `}</style>
 
       <style jsx global>{`
@@ -1049,6 +1257,273 @@ function CancelLoanModal({
           }
           .btn-confirm-danger:hover:not(:disabled) { background: #b91c1c; }
           .btn-confirm-danger:disabled { opacity: 0.6; cursor: not-allowed; }
+        `}</style>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// MODAL: Approval Token
+// ============================================
+
+function ApprovalTokenModal({
+  loanId,
+  existingToken,
+  existingTokenExp,
+  onClose,
+}: {
+  loanId: string;
+  existingToken?: string | null;
+  existingTokenExp?: string | null;
+  onClose: () => void;
+}) {
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState("");
+  const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
+  const [generatedExpiry, setGeneratedExpiry] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const now = new Date();
+  const hasActiveToken =
+    existingToken &&
+    existingTokenExp &&
+    new Date(existingTokenExp) > now;
+
+  const existingUrl = hasActiveToken
+    ? `${typeof window !== "undefined" ? window.location.origin : ""}/aprobacion/${existingToken}`
+    : null;
+
+  const displayUrl = generatedUrl ?? existingUrl;
+  const displayExpiry = generatedExpiry ?? (hasActiveToken ? existingTokenExp : null);
+
+  function getRemainingTime(expIso: string): string {
+    const diff = new Date(expIso).getTime() - Date.now();
+    if (diff <= 0) return "expirado";
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    if (hours > 0) return `${hours}h ${mins}m restantes`;
+    return `${mins} minutos restantes`;
+  }
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/loans/${loanId}/generate-token`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error?.message ?? "Error al generar el enlace");
+        return;
+      }
+      const data = await res.json();
+      setGeneratedUrl(data.approvalUrl);
+      setGeneratedExpiry(data.expiresAt);
+    } catch {
+      setError("Error de conexión");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  function handleCopy() {
+    if (displayUrl) {
+      navigator.clipboard.writeText(displayUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal atm-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">Enviar para Aprobación</h2>
+          <button className="modal-close" onClick={onClose}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        <p className="atm-desc">
+          Genera un enlace único para que el cliente revise y apruebe su préstamo desde su teléfono.
+          El enlace expira en 24 horas.
+        </p>
+
+        {/* Active token info */}
+        {displayUrl ? (
+          <div className="atm-url-section">
+            {displayExpiry && (
+              <div className="atm-expiry">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                </svg>
+                <span>Enlace activo — {getRemainingTime(displayExpiry)}</span>
+              </div>
+            )}
+            <div className="atm-url-box">
+              <span className="atm-url-text">{displayUrl}</span>
+            </div>
+            <div className="atm-url-actions">
+              <button className="btn-copy" onClick={handleCopy}>
+                {copied ? "✓ Copiado" : "Copiar enlace"}
+              </button>
+              <button
+                className="btn-regen"
+                onClick={handleGenerate}
+                disabled={generating}
+              >
+                {generating ? "Generando..." : "Regenerar"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="atm-empty">
+            <p className="atm-empty-text">No hay un enlace activo para este préstamo.</p>
+            <button
+              className="btn-gen-primary"
+              onClick={handleGenerate}
+              disabled={generating}
+            >
+              {generating ? "Generando..." : "Generar enlace de aprobación"}
+            </button>
+          </div>
+        )}
+
+        {error && <div className="atm-error">{error}</div>}
+
+        <style jsx>{`
+          .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+            padding: 16px;
+          }
+          .modal {
+            background: white;
+            border-radius: 14px;
+            width: 100%;
+            max-width: 440px;
+            padding: 24px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+          }
+          .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+          }
+          .modal-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #111827;
+          }
+          .modal-close {
+            background: none;
+            border: none;
+            color: #9ca3af;
+            cursor: pointer;
+            padding: 4px;
+          }
+          .modal-close:hover { color: #374151; }
+          .atm-modal { max-width: 520px; }
+          .atm-desc {
+            font-size: 0.85rem;
+            color: #6b7280;
+            line-height: 1.6;
+            margin: 0 0 20px;
+          }
+          .atm-url-section { width: 100%; }
+          .atm-expiry {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #059669;
+            margin-bottom: 10px;
+          }
+          .atm-url-box {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 10px 14px;
+            word-break: break-all;
+            margin-bottom: 12px;
+          }
+          .atm-url-text {
+            font-size: 0.8rem;
+            color: #4b5563;
+            font-family: monospace;
+          }
+          .atm-url-actions {
+            display: flex;
+            gap: 10px;
+          }
+          .btn-copy {
+            flex: 1;
+            background: #6B21E8;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+          }
+          .btn-copy:hover { background: #5b1dc4; }
+          .btn-regen {
+            background: white;
+            color: #6b7280;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+          }
+          .btn-regen:hover:not(:disabled) { background: #f9fafb; }
+          .btn-regen:disabled { opacity: 0.6; cursor: not-allowed; }
+          .atm-empty {
+            text-align: center;
+            padding: 16px 0;
+          }
+          .atm-empty-text {
+            font-size: 0.85rem;
+            color: #9ca3af;
+            margin: 0 0 14px;
+          }
+          .btn-gen-primary {
+            background: #6B21E8;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+          }
+          .btn-gen-primary:hover:not(:disabled) { background: #5b1dc4; }
+          .btn-gen-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+          .atm-error {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #dc2626;
+            font-size: 0.85rem;
+            margin-top: 14px;
+          }
         `}</style>
       </div>
     </div>
