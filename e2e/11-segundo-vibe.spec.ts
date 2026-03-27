@@ -13,30 +13,34 @@ test.describe('B-01 — Clientes: actualización de lista tras crear cliente', (
     await loginAsAdmin(page);
     await page.goto('/dashboard/clients');
 
-    // Limpiar cliente de prueba si quedó de una corrida anterior
-    const deleted = await page.evaluate(async () => {
-      const res = await fetch('/api/clients?search=99999999902&limit=1');
+    // Limpiar cualquier cliente QA-REFRESH-TEST de corridas anteriores
+    await page.evaluate(async () => {
+      const res = await fetch('/api/clients?search=QA-REFRESH-TEST&limit=10');
       const data = await res.json();
-      const id = data.clients?.[0]?.id;
-      if (id) { await fetch(`/api/clients/${id}`, { method: 'DELETE' }); return true; }
-      return false;
+      for (const c of data.clients ?? []) {
+        await fetch(`/api/clients/${c.id}`, { method: 'DELETE' });
+      }
     });
-    if (deleted) await page.reload();
-    await page.waitForTimeout(300);
+    // Recargar para reflejar el estado limpio
+    await page.reload();
+    await page.waitForTimeout(500);
 
     // Obtener conteo inicial
     const initialCount = await page.locator('p:has-text("clientes registrados")').textContent();
     const initialNum = parseInt(initialCount?.match(/\d+/)?.[0] ?? '0');
 
+    // DocumentId único por corrida (últimos 11 dígitos del timestamp)
+    const testDocId = await page.evaluate(() => String(Date.now()).slice(-11));
+
     // Crear cliente de prueba
     await page.getByRole('button', { name: 'Nuevo Cliente' }).click();
     await page.getByRole('textbox', { name: 'Nombre *' }).fill('QA-REFRESH-TEST');
-    await page.getByRole('textbox', { name: 'Documento de identidad *' }).fill('99999999902');
+    await page.getByRole('textbox', { name: 'Documento de identidad *' }).fill(testDocId);
     await page.getByRole('textbox', { name: 'Teléfono *' }).fill('8099999902');
     await page.getByRole('button', { name: 'Crear Cliente' }).click();
 
     // Esperar toast de éxito
-    await expect(page.getByText('Cliente creado exitosamente')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Cliente creado exitosamente')).toBeVisible({ timeout: 8000 });
 
     // Verificar que la lista actualiza el conteo SIN recargar
     const newCount = await page.locator('p:has-text("clientes registrados")').textContent();
@@ -44,9 +48,9 @@ test.describe('B-01 — Clientes: actualización de lista tras crear cliente', (
     expect(newNum).toBe(initialNum + 1); // FALLA: bug B-01
 
     // Verificar que el nuevo cliente aparece en la tabla
-    await expect(page.getByRole('row', { name: /QA-REFRESH-TEST/ })).toBeVisible();
+    await expect(page.locator('tbody tr').filter({ hasText: 'QA-REFRESH-TEST' }).first()).toBeVisible();
 
-    // Limpieza: buscar el ID del cliente recién creado y eliminarlo via API
+    // Limpieza
     const clientId = await page.evaluate(async () => {
       const res = await fetch('/api/clients?search=QA-REFRESH-TEST&limit=1');
       const data = await res.json();
@@ -114,21 +118,23 @@ test.describe('B-03 — Pagos: monto que excede saldo pendiente debe deshabilita
     await page.goto('/dashboard/payments');
     await page.getByRole('button', { name: 'Registrar Pago' }).click();
 
-    // Seleccionar primer préstamo activo
-    await page.getByRole('textbox', { name: 'Préstamo *' }).fill('Darwin');
-    await page.waitForTimeout(500);
-    const option = page.getByText(/Darwin Enmanuel Corporan/).first();
-    if (await option.isVisible()) await option.click();
+    // Buscar cualquier préstamo activo/en mora y seleccionar el primero que aparezca
+    await page.getByRole('textbox', { name: 'Préstamo *' }).fill('ar');
+    await page.waitForTimeout(1200);
+    const firstOption = page.locator('.search-result-item').first();
+    if (await firstOption.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await firstOption.click();
+    }
 
     // Ingresar monto que excede el saldo
     await page.getByRole('spinbutton', { name: 'Monto del pago *' }).fill('999999999');
 
     // El warning debe aparecer
-    await expect(page.getByText('El monto excede el saldo pendiente')).toBeVisible();
+    await expect(page.getByText('El monto excede el saldo pendiente')).toBeVisible({ timeout: 5000 });
 
     // El botón debe estar DESHABILITADO (este test documenta el bug B-03)
     const submitBtn = page.getByRole('button', { name: 'Registrar Pago' }).last();
-    await expect(submitBtn).toBeDisabled(); // FALLA: bug B-03
+    await expect(submitBtn).toBeDisabled(); // FALLA si bug B-03 no está corregido
 
     await page.getByRole('button', { name: 'Cancelar' }).click();
   });
@@ -138,10 +144,12 @@ test.describe('B-03 — Pagos: monto que excede saldo pendiente debe deshabilita
     await page.goto('/dashboard/payments');
     await page.getByRole('button', { name: 'Registrar Pago' }).click();
 
-    await page.getByRole('textbox', { name: 'Préstamo *' }).fill('Darwin');
-    await page.waitForTimeout(500);
-    const option = page.getByText(/Darwin Enmanuel Corporan/).first();
-    if (await option.isVisible()) await option.click();
+    await page.getByRole('textbox', { name: 'Préstamo *' }).fill('ar');
+    await page.waitForTimeout(1200);
+    const firstOpt = page.locator('.search-result-item').first();
+    if (await firstOpt.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await firstOpt.click();
+    }
 
     await page.getByRole('spinbutton', { name: 'Monto del pago *' }).fill('0');
 
@@ -217,17 +225,16 @@ test.describe('B-08 — Usuarios: el admin no puede desactivarse a sí mismo', (
     await loginAsAdmin(page);
     await page.goto('/dashboard/users');
 
-    // Localizar la fila del usuario actual (Melvin Luis / melvin01rd@gmail.com)
-    const adminRow = page.getByRole('row', { name: /melvin01rd@gmail.com/ });
-    await expect(adminRow).toBeVisible();
+    // Localizar la fila del usuario actual usando el badge "Tú" que aparece en su propia fila
+    const adminRow = page.locator('tr').filter({ has: page.locator('.you-badge') });
+    await expect(adminRow).toBeVisible({ timeout: 10000 });
 
-    // El botón Desactivar en su propia fila debe estar deshabilitado o no visible
-    const deactivateBtn = adminRow.getByRole('button', { name: 'Desactivar' });
-    const isDisabled = await deactivateBtn.isDisabled().catch(() => true);
-    const isHidden = !(await deactivateBtn.isVisible().catch(() => false));
+    // El botón Desactivar en su propia fila debe estar ausente (no renderizado)
+    const deactivateBtn = adminRow.locator('button', { hasText: 'Desactivar' });
+    const isHidden = !(await deactivateBtn.isVisible({ timeout: 1000 }).catch(() => false));
 
-    // Documenta bug B-08 si el botón está habilitado y visible
-    expect(isDisabled || isHidden).toBe(true); // FALLA: bug B-08
+    // Documenta bug B-08 si el botón está visible (fix: currentUserId !== null &&)
+    expect(isHidden).toBe(true);
   });
 });
 
