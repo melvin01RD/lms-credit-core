@@ -10,7 +10,12 @@ export const GET = withAuth(async (req) => {
   const page = Number(searchParams.get("page") ?? 1);
   const limit = Number(searchParams.get("limit") ?? 20);
   const clientId = searchParams.get("clientId") ?? undefined;
-  const status = searchParams.get("status") as LoanStatus | undefined;
+  const statusParam = searchParams.get("status");
+  const status = statusParam
+    ? statusParam.includes(",")
+      ? (statusParam.split(",") as LoanStatus[])
+      : (statusParam as LoanStatus)
+    : undefined;
   const search = searchParams.get("search") ?? undefined;
 
   const result = await getLoans(

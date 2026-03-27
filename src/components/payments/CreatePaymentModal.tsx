@@ -54,7 +54,7 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await fetch(`/api/loans?search=${encodeURIComponent(searchTerm)}&status=ACTIVE&limit=10`);
+        const res = await fetch(`/api/loans?search=${encodeURIComponent(searchTerm)}&status=ACTIVE,OVERDUE&limit=10`);
         const data = await res.json();
         setLoans(data.data || []);
       } catch (err) {
@@ -309,7 +309,15 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
             <button type="button" className="btn-secondary" onClick={onClose}>
               Cancelar
             </button>
-            <button type="submit" className="btn-primary" disabled={saving || !form.loanId}>
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={
+                saving ||
+                !form.loanId ||
+                (!!selectedLoan && !!form.totalAmount && Number(form.totalAmount) > Number(selectedLoan.remainingCapital))
+              }
+            >
               {saving ? "Registrando..." : "Registrar Pago"}
             </button>
           </div>

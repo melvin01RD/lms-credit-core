@@ -244,7 +244,7 @@ export default function UsersPage() {
                         </svg>
                         Contraseña
                       </button>
-                      {user.active && user.id !== currentUserId && (
+                      {user.active && currentUserId !== null && user.id !== currentUserId && (
                         <button
                           className="btn-action btn-deactivate"
                           onClick={() => handleDeactivate(user)}

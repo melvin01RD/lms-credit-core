@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRoleGuard } from "@/hooks/useRoleGuard";
 
 // ============================================================
 // TYPES
@@ -34,6 +35,7 @@ const FREQUENCY_LABELS: Record<string, string> = {
 // ============================================================
 
 export default function ProductosPage() {
+  useRoleGuard("ADMIN");
   const [products, setProducts] = useState<LoanProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);

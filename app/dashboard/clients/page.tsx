@@ -210,6 +210,7 @@ export default function ClientsPage() {
             setShowModal(false);
             setSearch("");
             setPage(1);
+            fetchClients();
             showToast("Cliente creado exitosamente");
           }}
         />

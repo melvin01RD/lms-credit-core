@@ -36,7 +36,7 @@ export interface CreateLoanInput {
 
 export interface LoanFilters {
   clientId?: string;
-  status?: LoanStatus;
+  status?: LoanStatus | LoanStatus[];
   loanStructure?: LoanStructure;
   createdById?: string;
   search?: string;
@@ -378,7 +378,11 @@ export async function getLoans(
   const where: Prisma.LoanWhereInput = {};
 
   if (filters?.clientId)      where.clientId = filters.clientId;
-  if (filters?.status)        where.status = filters.status;
+  if (filters?.status) {
+    where.status = Array.isArray(filters.status)
+      ? { in: filters.status }
+      : filters.status;
+  }
   if (filters?.loanStructure) where.loanStructure = filters.loanStructure;
   if (filters?.createdById)   where.createdById = filters.createdById;
 
