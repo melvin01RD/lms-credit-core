@@ -367,6 +367,7 @@ function ProductModal({
 
     if (!form.name.trim()) { setError("El nombre es requerido."); return; }
     if (isNaN(rate) || rate < 0) { setError("La tasa debe ser mayor o igual a 0."); return; }
+    if (rate > 50) { setError("La tasa no puede superar el 50%."); return; }
     if (isNaN(terms) || terms < 1) { setError("El número de cuotas debe ser mayor a 0."); return; }
 
     const minAmt = form.minAmount ? parseFloat(form.minAmount) : null;

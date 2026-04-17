@@ -257,7 +257,6 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
                 value={form.totalAmount}
                 onChange={(e) => setForm({ ...form, totalAmount: e.target.value })}
                 placeholder="0.00"
-                required
               />
             </div>
             {selectedLoan && form.totalAmount && Number(form.totalAmount) > Number(selectedLoan.remainingCapital) && (
@@ -280,7 +279,6 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
                 type="date"
                 value={form.paymentDate}
                 onChange={(e) => setForm({ ...form, paymentDate: e.target.value })}
-                required
                 max={new Date().toISOString().split("T")[0]}
               />
               {fieldErrors.paymentDate && (

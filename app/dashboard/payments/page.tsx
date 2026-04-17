@@ -251,8 +251,8 @@ export default function PaymentsPage() {
                         </div>
                       </div>
                     </td>
-                    <td className={`td-bold ${isNegative ? "td-negative" : ""}`}>
-                      {isNegative ? "−" : ""}RD$ {fmt(Math.abs(Number(payment.totalAmount)))}
+                    <td className="td-bold">
+                      RD$ {fmt(Math.abs(Number(payment.totalAmount)))}
                     </td>
                     <td>RD$ {fmt(Math.abs(Number(payment.capitalApplied)))}</td>
                     <td>RD$ {fmt(Math.abs(Number(payment.interestApplied)))}</td>
@@ -539,9 +539,6 @@ export default function PaymentsPage() {
 
         .td-bold {
           font-weight: 600;
-        }
-        .td-negative {
-          color: #dc2626;
         }
         .td-secondary {
           color: #9ca3af;

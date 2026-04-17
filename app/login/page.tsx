@@ -142,12 +142,11 @@ export default function LoginPage() {
               </svg>
               <input
                 id="email"
-                type="email"
+                type="text"
                 className="form-input"
                 placeholder="usuario@ejemplo.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                required
                 autoComplete="off"
                 autoFocus
               />
@@ -170,7 +169,6 @@ export default function LoginPage() {
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                required
                 autoComplete="off"
               />
               <button

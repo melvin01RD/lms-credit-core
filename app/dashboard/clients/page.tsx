@@ -587,7 +587,6 @@ function CreateClientModal({
                 className="form-input"
                 value={form.firstName}
                 onChange={(e) => updateField("firstName", e.target.value)}
-                required
                 autoFocus
                 maxLength={25}
               />
@@ -620,7 +619,6 @@ function CreateClientModal({
                     setFieldErrors((prev) => ({ ...prev, documentId: "" }));
                   }
                 }}
-                required
                 placeholder="00100000008"
                 maxLength={11}
                 inputMode="numeric"
@@ -641,7 +639,6 @@ function CreateClientModal({
                     setFieldErrors((prev) => ({ ...prev, phone: "" }));
                   }
                 }}
-                required
                 placeholder="8090000000"
                 maxLength={10}
                 inputMode="numeric"
@@ -658,7 +655,7 @@ function CreateClientModal({
               <input
                 id="email"
                 className="form-input"
-                type="email"
+                type="text"
                 value={form.email}
                 onChange={(e) => updateField("email", e.target.value)}
                 placeholder="cliente@ejemplo.com"

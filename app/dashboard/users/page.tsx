@@ -559,14 +559,35 @@ function CreateUserModal({
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   function update(field: string, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
+    if (fieldErrors[field]) setFieldErrors((prev) => ({ ...prev, [field]: "" }));
+  }
+
+  function validateFields(): boolean {
+    const errors: Record<string, string> = {};
+    if (!form.firstName.trim()) errors.firstName = "Este campo es obligatorio.";
+    if (!form.lastName.trim()) errors.lastName = "Este campo es obligatorio.";
+    if (!form.email.trim()) {
+      errors.email = "Este campo es obligatorio.";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      errors.email = "Ingresa un correo electrónico válido.";
+    }
+    if (!form.password.trim()) {
+      errors.password = "Este campo es obligatorio.";
+    } else if (form.password.length < 8) {
+      errors.password = "La contraseña debe tener al menos 8 caracteres.";
+    }
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (!validateFields()) return;
     setSaving(true);
     try {
       const res = await fetch("/api/users", {
@@ -606,22 +627,26 @@ function CreateUserModal({
           <div className="form-row">
             <div className="form-group">
               <label className="form-label">Nombre *</label>
-              <input className="form-input" value={form.firstName} onChange={(e) => update("firstName", e.target.value)} required autoFocus />
+              <input className="form-input" value={form.firstName} onChange={(e) => update("firstName", e.target.value)} autoFocus />
+              {fieldErrors.firstName && <span className="field-error" role="alert">{fieldErrors.firstName}</span>}
             </div>
             <div className="form-group">
               <label className="form-label">Apellido *</label>
-              <input className="form-input" value={form.lastName} onChange={(e) => update("lastName", e.target.value)} required />
+              <input className="form-input" value={form.lastName} onChange={(e) => update("lastName", e.target.value)} />
+              {fieldErrors.lastName && <span className="field-error" role="alert">{fieldErrors.lastName}</span>}
             </div>
           </div>
 
           <div className="form-group" style={{ marginBottom: "12px" }}>
             <label className="form-label">Email *</label>
-            <input className="form-input" type="email" value={form.email} onChange={(e) => update("email", e.target.value)} required placeholder="usuario@ejemplo.com" />
+            <input className="form-input" type="text" value={form.email} onChange={(e) => update("email", e.target.value)} placeholder="usuario@ejemplo.com" />
+            {fieldErrors.email && <span className="field-error" role="alert">{fieldErrors.email}</span>}
           </div>
 
           <div className="form-group" style={{ marginBottom: "12px" }}>
             <label className="form-label">Contraseña *</label>
-            <input className="form-input" type="password" value={form.password} onChange={(e) => update("password", e.target.value)} required minLength={8} placeholder="Mín. 8 caracteres, 1 mayúscula, 1 número" />
+            <input className="form-input" type="password" value={form.password} onChange={(e) => update("password", e.target.value)} placeholder="Mín. 8 caracteres, 1 mayúscula, 1 número" />
+            {fieldErrors.password && <span className="field-error" role="alert">{fieldErrors.password}</span>}
             <span className="form-hint">Debe contener al menos 1 mayúscula, 1 minúscula y 1 número.</span>
           </div>
 
@@ -675,14 +700,30 @@ function EditUserModal({
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   function update(field: string, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
+    if (fieldErrors[field]) setFieldErrors((prev) => ({ ...prev, [field]: "" }));
+  }
+
+  function validateFields(): boolean {
+    const errors: Record<string, string> = {};
+    if (!form.firstName.trim()) errors.firstName = "Este campo es obligatorio.";
+    if (!form.lastName.trim()) errors.lastName = "Este campo es obligatorio.";
+    if (!form.email.trim()) {
+      errors.email = "Este campo es obligatorio.";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      errors.email = "Ingresa un correo electrónico válido.";
+    }
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (!validateFields()) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/users/${user.id}`, {
@@ -722,17 +763,20 @@ function EditUserModal({
           <div className="form-row">
             <div className="form-group">
               <label className="form-label">Nombre *</label>
-              <input className="form-input" value={form.firstName} onChange={(e) => update("firstName", e.target.value)} required autoFocus />
+              <input className="form-input" value={form.firstName} onChange={(e) => update("firstName", e.target.value)} autoFocus />
+              {fieldErrors.firstName && <span className="field-error" role="alert">{fieldErrors.firstName}</span>}
             </div>
             <div className="form-group">
               <label className="form-label">Apellido *</label>
-              <input className="form-input" value={form.lastName} onChange={(e) => update("lastName", e.target.value)} required />
+              <input className="form-input" value={form.lastName} onChange={(e) => update("lastName", e.target.value)} />
+              {fieldErrors.lastName && <span className="field-error" role="alert">{fieldErrors.lastName}</span>}
             </div>
           </div>
 
           <div className="form-group" style={{ marginBottom: "16px" }}>
             <label className="form-label">Email *</label>
-            <input className="form-input" type="email" value={form.email} onChange={(e) => update("email", e.target.value)} required />
+            <input className="form-input" type="text" value={form.email} onChange={(e) => update("email", e.target.value)} />
+            {fieldErrors.email && <span className="field-error" role="alert">{fieldErrors.email}</span>}
           </div>
 
           <div className="modal-actions">
@@ -828,8 +872,6 @@ function ChangePasswordModal({
               type="password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              required
-              minLength={8}
               placeholder="Mín. 8 caracteres, 1 mayúscula, 1 número"
               autoFocus
             />
@@ -843,7 +885,6 @@ function ChangePasswordModal({
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              required
               placeholder="Repetir contraseña"
             />
           </div>

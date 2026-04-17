@@ -877,7 +877,6 @@ function CreateLoanModal({
                 value={form.principalAmount}
                 onChange={(e) => updateField("principalAmount", e.target.value)}
                 placeholder="50000"
-                required
               />
               {fieldErrors.principalAmount && (
                 <span className="field-error" role="alert">{fieldErrors.principalAmount}</span>
@@ -894,7 +893,6 @@ function CreateLoanModal({
                 value={form.totalFinanceCharge}
                 onChange={(e) => updateField("totalFinanceCharge", e.target.value)}
                 placeholder="3500"
-                required
               />
               {fieldErrors.totalFinanceCharge && (
                 <span className="field-error" role="alert">{fieldErrors.totalFinanceCharge}</span>
@@ -928,7 +926,6 @@ function CreateLoanModal({
                 value={form.termCount}
                 onChange={(e) => updateField("termCount", e.target.value)}
                 placeholder="45"
-                required
               />
               {fieldErrors.termCount && (
                 <span className="field-error" role="alert">{fieldErrors.termCount}</span>
