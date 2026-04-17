@@ -25,6 +25,7 @@ interface DashboardMetrics {
   totalOutstanding: number;
   totalInterest: number;
   totalLateFees: number;
+  overdueAmount: number;
   activeClients: number;
   activeLoans: number;
   overdueLoans: number;
@@ -59,7 +60,7 @@ interface FlatRateMetrics {
   cobrosHoy: number;
   cuotasVencidas: number;
   montoVencido: number;
-  cartеraActiva: number;
+  carteraActiva: number;
   prestamosActivos: number;
 }
 
@@ -203,7 +204,7 @@ export default function DashboardPage() {
           title="Préstamos en Mora"
           value={metrics.overdueLoans}
           color="red"
-          subtitle={`RD$ ${fmtShort(metrics.totalLateFees)} en mora`}
+          subtitle={`RD$ ${fmtShort(metrics.overdueAmount)} en mora`}
           icon={
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
@@ -273,7 +274,7 @@ export default function DashboardPage() {
             />
             <MetricCard
               title="Cartera Activa"
-              value={`RD$ ${fmtShort(flatRateMetrics.cartеraActiva)}`}
+              value={`RD$ ${fmtShort(flatRateMetrics.carteraActiva)}`}
               color="blue"
               subtitle={`${flatRateMetrics.prestamosActivos} préstamos activos`}
               icon={

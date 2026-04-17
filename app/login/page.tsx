@@ -14,13 +14,25 @@ export default function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+
+    // BUG-S1-05: leer del DOM para capturar autofill que bypasea onChange de React
+    const emailValue =
+      (document.getElementById("email") as HTMLInputElement)?.value ?? email;
+    const passwordValue =
+      (document.getElementById("password") as HTMLInputElement)?.value ?? password;
+
+    if (!emailValue.trim() || !passwordValue.trim()) {
+      setError("Por favor ingresa tu correo y contraseña.");
+      return;
+    }
+
     setLoading(true);
 
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: emailValue, password: passwordValue }),
       });
 
       const data = await res.json();
@@ -136,7 +148,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                autoComplete="email"
+                autoComplete="off"
                 autoFocus
               />
             </div>
@@ -159,7 +171,7 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                autoComplete="current-password"
+                autoComplete="off"
               />
               <button
                 type="button"

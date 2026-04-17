@@ -10,6 +10,7 @@ export interface DashboardMetrics {
   totalOutstanding: number;
   totalInterest: number;
   totalLateFees: number;
+  overdueAmount: number;
   activeClients: number;
   activeLoans: number;
   overdueLoans: number;
@@ -67,6 +68,8 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
     payments,
     paymentsThisMonth,
     activeClientsCount,
+    pendingPrincipalResult,
+    overdueScheduleResult,
   ] = await Promise.all([
     // Todos los préstamos con aggregations
     prisma.loan.findMany({
@@ -125,18 +128,38 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
         },
       },
     }),
+
+    // BUG-S1-04: capital pendiente puro (solo principalExpected de cuotas no pagadas)
+    prisma.paymentSchedule.aggregate({
+      _sum: { principalExpected: true },
+      where: {
+        status: { in: [ScheduleStatus.PENDING, ScheduleStatus.OVERDUE] },
+      },
+    }),
+
+    // BUG-S1-03: monto real vencido (cuotas con status OVERDUE en la agenda)
+    prisma.paymentSchedule.aggregate({
+      _sum: { expectedAmount: true },
+      where: { status: ScheduleStatus.OVERDUE },
+    }),
   ]);
 
   // Calcular métricas principales
   const totalLoaned = loans.reduce((sum, l) => sum + Number(l.principalAmount), 0);
-  const totalOutstanding = loans
-    .filter((l) => l.status === LoanStatus.ACTIVE || l.status === LoanStatus.OVERDUE)
-    .reduce((sum, l) => sum + Number(l.remainingCapital), 0);
+
+  // BUG-S1-04: usar principalExpected de la agenda, no remainingCapital del préstamo
+  const totalOutstanding = Number(pendingPrincipalResult._sum.principalExpected ?? 0);
 
   const totalInterest = payments.reduce((sum, p) => sum + Number(p.interestApplied), 0);
   const totalLateFees = payments.reduce((sum, p) => sum + Number(p.lateFeeApplied), 0);
 
-  const activeLoans = loans.filter((l) => l.status === LoanStatus.ACTIVE).length;
+  // BUG-S1-03: monto vencido real desde la agenda de pagos
+  const overdueAmount = Number(overdueScheduleResult._sum.expectedAmount ?? 0);
+
+  // BUG-S1-02: activeLoans incluye ACTIVE + OVERDUE (préstamo en mora sigue siendo activo)
+  const activeLoans = loans.filter((l) =>
+    l.status === LoanStatus.ACTIVE || l.status === LoanStatus.OVERDUE
+  ).length;
   const overdueLoans = loans.filter((l) => l.status === LoanStatus.OVERDUE).length;
   const paidLoans = loans.filter((l) => l.status === LoanStatus.PAID).length;
 
@@ -162,6 +185,7 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
     totalOutstanding,
     totalInterest,
     totalLateFees,
+    overdueAmount,
     activeClients: activeClientsCount,
     activeLoans,
     overdueLoans,
@@ -316,7 +340,7 @@ export interface FlatRateMetrics {
   cobrosHoy: number;         // pagos cobrados hoy de préstamos Flat Rate
   cuotasVencidas: number;    // cuotas con status OVERDUE
   montoVencido: number;      // monto total de cuotas vencidas
-  cartеraActiva: number;     // capital pendiente de préstamos Flat Rate activos
+  carteraActiva: number;     // capital pendiente de préstamos Flat Rate activos
   prestamosActivos: number;  // count de préstamos Flat Rate activos
 }
 
@@ -353,10 +377,10 @@ export async function getFlatRateMetrics(): Promise<FlatRateMetrics> {
   const cobrosHoy = cobrosHoyResult.reduce((s, p) => s + Number(p.totalAmount), 0);
   const cuotasVencidas = scheduleOverdue.length;
   const montoVencido = scheduleOverdue.reduce((s, e) => s + Number(e.expectedAmount), 0);
-  const cartеraActiva = activeLoans.reduce((s, l) => s + Number(l.remainingCapital), 0);
+  const carteraActiva = activeLoans.reduce((s, l) => s + Number(l.remainingCapital), 0);
   const prestamosActivos = activeLoans.length;
 
-  return { cobrosHoy, cuotasVencidas, montoVencido, cartеraActiva, prestamosActivos };
+  return { cobrosHoy, cuotasVencidas, montoVencido, carteraActiva, prestamosActivos };
 }
 
 function getUpcomingPayments(loans: any[]): UpcomingPayment[] {
