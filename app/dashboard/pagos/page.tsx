@@ -67,6 +67,7 @@ const TYPE_LABELS: Record<string, string> = {
   REGULAR: "Regular",
   CAPITAL_PAYMENT: "Abono Capital",
   FULL_SETTLEMENT: "Liquidación",
+  ADVANCE: "Adelanto",
 };
 
 const TYPE_FILTERS = [
@@ -602,6 +603,9 @@ export default function PaymentsPage() {
         @keyframes slideIn {
           from { opacity: 0; transform: translateX(20px); }
           to   { opacity: 1; transform: translateX(0); }
+        }
+        @media (max-width: 768px) {
+          .table { min-width: 100%; }
         }
       `}</style>
     </div>

@@ -305,6 +305,7 @@ function calculatePortfolioDistribution(loans: any[]): PortfolioDistribution[] {
   const distribution = new Map<string, { count: number; amount: number }>();
 
   const statusLabels: Record<string, string> = {
+    DRAFT: "Borradores",
     ACTIVE: "Activos",
     OVERDUE: "En Mora",
     PAID: "Pagados",

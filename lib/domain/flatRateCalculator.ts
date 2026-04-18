@@ -85,7 +85,9 @@ export function calculateFlatRateLoan(input: FlatRateLoanInput): FlatRateLoanRes
 
   if (principalAmount <= 0) throw new Error("El capital debe ser mayor a cero");
   if (totalFinanceCharge < 0) throw new Error("El cargo financiero no puede ser negativo");
+  if (totalFinanceCharge > principalAmount) throw new Error("El cargo financiero no puede superar el monto del capital");
   if (termCount <= 0) throw new Error("El número de cuotas debe ser mayor a cero");
+  if (termCount > 360) throw new Error("El número de cuotas no puede superar 360");
 
   const totalPayableAmount = principalAmount + totalFinanceCharge;
   const installmentAmount = Math.round((totalPayableAmount / termCount) * 100) / 100;
@@ -101,6 +103,14 @@ export function calculateFlatRateLoan(input: FlatRateLoanInput): FlatRateLoanRes
     paymentFrequency,
     startDate
   );
+
+  // Assign rounding residual to last installment so sum of all installments equals totalPayableAmount exactly
+  if (termCount > 1) {
+    const last = schedule[schedule.length - 1];
+    last.expectedAmount = Math.round((totalPayableAmount - installmentAmount * (termCount - 1)) * 100) / 100;
+    last.principalExpected = Math.round((principalAmount - principalPerInstallment * (termCount - 1)) * 100) / 100;
+    last.interestExpected = Math.round((totalFinanceCharge - interestPerInstallment * (termCount - 1)) * 100) / 100;
+  }
 
   return {
     principalAmount,

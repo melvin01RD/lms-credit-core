@@ -61,6 +61,14 @@ const FREQ_LABELS: Record<string, string> = {
   MONTHLY: "Mensual",
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  DRAFT: "Borrador",
+  ACTIVE: "Al día",
+  OVERDUE: "En mora",
+  PAID: "Pagado",
+  CANCELED: "Cancelado",
+};
+
 export default function AgendaPage() {
   const [selectedDay, setSelectedDay] = useState<DayOfWeek>(todayEnum());
   const [data, setData] = useState<AgendaData | null>(null);
@@ -174,7 +182,7 @@ export default function AgendaPage() {
                         <td>RD$ {fmt(loan.remainingCapital)}</td>
                         <td>
                           <span className={`status-badge status-${loan.status.toLowerCase()}`}>
-                            {loan.status === "OVERDUE" ? "En mora" : "Al día"}
+                            {STATUS_LABELS[loan.status] ?? loan.status}
                           </span>
                         </td>
                         <td className="td-secondary">
@@ -274,7 +282,7 @@ export default function AgendaPage() {
           background: white;
           border-radius: 12px;
           border: 1px solid #e5e7eb;
-          overflow: hidden;
+          overflow-x: auto;
         }
         .client-card-header {
           display: flex;
@@ -331,6 +339,7 @@ export default function AgendaPage() {
 
         .loans-table {
           width: 100%;
+          min-width: 650px;
           border-collapse: collapse;
           font-size: 0.825rem;
         }

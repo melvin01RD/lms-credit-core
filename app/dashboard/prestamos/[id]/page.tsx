@@ -111,6 +111,7 @@ const PAYMENT_TYPE_LABELS: Record<string, string> = {
   REGULAR: "Regular",
   CAPITAL_PAYMENT: "Abono a capital",
   FULL_SETTLEMENT: "Liquidación total",
+  ADVANCE: "Adelanto",
 };
 
 // ============================================

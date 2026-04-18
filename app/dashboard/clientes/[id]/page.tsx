@@ -115,10 +115,19 @@ export default function ClientDetailPage() {
   const fmt = (n: number) => n.toLocaleString("es-DO", { minimumFractionDigits: 2 });
 
   const statusColors: Record<string, { bg: string; color: string }> = {
+    DRAFT: { bg: "#fef9c3", color: "#a16207" },
     ACTIVE: { bg: "#d1fae5", color: "#059669" },
     OVERDUE: { bg: "#fee2e2", color: "#dc2626" },
     PAID: { bg: "#dbeafe", color: "#2563eb" },
     CANCELED: { bg: "#f3f4f6", color: "#6b7280" },
+  };
+
+  const statusLabels: Record<string, string> = {
+    DRAFT: "Borrador",
+    ACTIVE: "Activo",
+    OVERDUE: "En mora",
+    PAID: "Pagado",
+    CANCELED: "Cancelado",
   };
 
   const frequencyLabels: Record<string, string> = {
@@ -222,7 +231,7 @@ export default function ClientDetailPage() {
                     <td>RD$ {fmt(Number(loan.remainingCapital))}</td>
                     <td>
                       <span className="status-badge" style={{ background: sc.bg, color: sc.color }}>
-                        {loan.status}
+                        {statusLabels[loan.status] ?? loan.status}
                       </span>
                     </td>
                     <td className="td-secondary">
@@ -372,10 +381,10 @@ export default function ClientDetailPage() {
           background: white;
           border-radius: 12px;
           border: 1px solid #e5e7eb;
-          overflow: hidden;
+          overflow-x: auto;
           margin-bottom: 20px;
         }
-        .table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .table { width: 100%; min-width: 700px; border-collapse: collapse; font-size: 0.85rem; }
         .table thead { background: #f9fafb; }
         .table th {
           text-align: left; padding: 10px 14px; font-weight: 600; color: #6b7280;

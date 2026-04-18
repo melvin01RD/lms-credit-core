@@ -62,6 +62,7 @@ const STATUS_FILTERS: { label: string; value: string }[] = [
 ];
 
 const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
+  DRAFT: { bg: "#fef9c3", color: "#a16207" },
   ACTIVE: { bg: "#d1fae5", color: "#059669" },
   OVERDUE: { bg: "#fee2e2", color: "#dc2626" },
   PAID: { bg: "#dbeafe", color: "#2563eb" },
@@ -69,6 +70,7 @@ const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
+  DRAFT: "Borrador",
   ACTIVE: "Activo",
   OVERDUE: "En mora",
   PAID: "Pagado",
@@ -550,6 +552,9 @@ export default function LoansPage() {
         @keyframes slideIn {
           from { opacity: 0; transform: translateX(20px); }
           to   { opacity: 1; transform: translateX(0); }
+        }
+        @media (max-width: 768px) {
+          .table { min-width: 100%; }
         }
       `}</style>
     </div>

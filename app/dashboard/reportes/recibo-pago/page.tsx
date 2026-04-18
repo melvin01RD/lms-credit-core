@@ -40,6 +40,7 @@ const TYPE_LABELS: Record<string, string> = {
   REGULAR: "Regular",
   CAPITAL_PAYMENT: "Abono a Capital",
   FULL_SETTLEMENT: "Liquidación Total",
+  ADVANCE: "Adelanto",
 };
 
 const FREQ_LABELS: Record<string, string> = {
