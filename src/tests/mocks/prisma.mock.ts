@@ -51,6 +51,10 @@ export const prismaMock = {
     update: vi.fn(),
     updateMany: vi.fn(),
     count: vi.fn(),
+    aggregate: vi.fn().mockResolvedValue({ _sum: { principalExpected: null, expectedAmount: null } }),
+    groupBy: vi.fn(),
+    delete: vi.fn(),
+    deleteMany: vi.fn(),
   },
 
   // SystemConfig operations

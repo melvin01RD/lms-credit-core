@@ -90,8 +90,10 @@ describe("GET /api/loans", () => {
 
     const req = makeRequest("http://localhost/api/loans");
     const res = await GET(req);
+    const body = await res.json();
 
     expect(res.status).toBe(401);
+    expect(body.error.code).toBe("NOT_AUTHENTICATED");
   });
 });
 
@@ -134,13 +136,18 @@ describe("POST /api/loans", () => {
         principalAmount: 10000,
         paymentFrequency: "WEEKLY",
         termCount: 8,
+        createdById: "user-1",
+        // totalFinanceCharge: ausente intencionalmente
       },
     });
     const res = await POST(req);
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.error).toContain("totalFinanceCharge");
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(body.error.details).toContainEqual(
+      expect.objectContaining({ field: "totalFinanceCharge" })
+    );
     expect(createLoan).not.toHaveBeenCalled();
   });
 });
@@ -170,8 +177,10 @@ describe("GET /api/loans/[id]", () => {
     const req = makeRequest("http://localhost/api/loans/non-existent");
     const context = { params: Promise.resolve({ id: "non-existent" }) };
     const res = await GET_BY_ID(req, context);
+    const body = await res.json();
 
     expect(res.status).toBe(404);
+    expect(body.error.code).toBe("LOAN_NOT_FOUND");
   });
 });
 
@@ -220,8 +229,10 @@ describe("PATCH /api/loans/[id]", () => {
     });
     const context = { params: Promise.resolve({ id: "loan-1" }) };
     const res = await PATCH(req, context);
+    const body = await res.json();
 
     expect(res.status).toBe(400);
+    expect(body.error.code).toBe("MISSING_USER_ID");
     expect(cancelLoan).not.toHaveBeenCalled();
   });
 
@@ -232,8 +243,10 @@ describe("PATCH /api/loans/[id]", () => {
     });
     const context = { params: Promise.resolve({ id: "loan-1" }) };
     const res = await PATCH(req, context);
+    const body = await res.json();
 
     expect(res.status).toBe(400);
+    expect(body.error.code).toBe("INVALID_ACTION");
   });
 
   it("retorna 404 cuando préstamo no existe", async () => {
@@ -245,8 +258,10 @@ describe("PATCH /api/loans/[id]", () => {
     });
     const context = { params: Promise.resolve({ id: "non-existent" }) };
     const res = await PATCH(req, context);
+    const body = await res.json();
 
     expect(res.status).toBe(404);
+    expect(body.error.code).toBe("LOAN_NOT_FOUND");
   });
 
   it("retorna 400 cuando préstamo ya está pagado", async () => {
@@ -261,7 +276,9 @@ describe("PATCH /api/loans/[id]", () => {
     });
     const context = { params: Promise.resolve({ id: "loan-1" }) };
     const res = await PATCH(req, context);
+    const body = await res.json();
 
     expect(res.status).toBe(400);
+    expect(body.error.code).toBe("PAYMENT_NOT_ALLOWED");
   });
 });

@@ -66,13 +66,17 @@ describe("getDashboardMetrics - Core Metrics", () => {
       .mockResolvedValueOnce(payments)        // all payments
       .mockResolvedValueOnce(paymentsThisMonth); // payments this month
     prismaMock.client.count.mockResolvedValue(3);
+    // BUG-S1-04: aggregate provides totalOutstanding (pendingPrincipal) and overdueAmount
+    prismaMock.paymentSchedule.aggregate
+      .mockResolvedValueOnce({ _sum: { principalExpected: 30000 } })
+      .mockResolvedValueOnce({ _sum: { expectedAmount: 7000 } });
 
     const result = await getDashboardMetrics();
 
     // Total loaned = 10000 + 20000 + 5000 + 8000
     expect(result.totalLoaned).toBe(43000);
 
-    // Outstanding = ACTIVE + OVERDUE remaining = 8000 + 15000 + 7000
+    // Outstanding = principalExpected from paymentSchedule.aggregate (BUG-S1-04)
     expect(result.totalOutstanding).toBe(30000);
 
     // Interest = 150 + 250
@@ -81,8 +85,8 @@ describe("getDashboardMetrics - Core Metrics", () => {
     // Late fees = 50 + 50
     expect(result.totalLateFees).toBe(100);
 
-    // Loan counts by status
-    expect(result.activeLoans).toBe(2);
+    // Loan counts by status — activeLoans = ACTIVE + OVERDUE (BUG-S1-02)
+    expect(result.activeLoans).toBe(3);
     expect(result.overdueLoans).toBe(1);
     expect(result.paidLoans).toBe(1);
 
