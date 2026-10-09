@@ -32,6 +32,7 @@ function makeRequest(
 }
 
 const mockClient = {
+  collectionDays: [],
   id: "client-1",
   firstName: "Juan",
   lastName: "Pérez",
