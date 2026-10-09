@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useInactivityLogout } from "@/hooks/useInactivityLogout";
+import SessionTransition from "@/components/auth/SessionTransition";
 
 interface User {
   userId: string;
@@ -94,41 +95,108 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [sessionError, setSessionError] = useState("");
+  const [logoutFailed, setLogoutFailed] = useState(false);
+  const request = useRef<AbortController | null>(null);
+  const exiting = useRef(false);
+  const logoutRequested = useRef(false);
+  const sessionChannel = useRef<BroadcastChannel | null>(null);
+  const retryCheck = useRef<() => void>(() => {});
 
-  useInactivityLogout();
+  const handleLogout = useCallback(async (reason?: "inactivity") => {
+    if (exiting.current) return;
+    exiting.current = true;
+    logoutRequested.current = true;
+    request.current?.abort();
+    setLoggingOut(true);
+    setUser(null);
+    setSessionError("");
+    setLogoutFailed(false);
+    try {
+      const response = await fetch("/api/auth/logout", { method: "POST", cache: "no-store" });
+      if (!response.ok) throw new Error("logout failed");
+      sessionChannel.current?.postMessage("logout");
+      // A document replacement also discards Next's in-memory private route cache.
+      window.location.replace(reason ? "/login?reason=inactivity" : "/login");
+    } catch {
+      exiting.current = false;
+      setLoggingOut(false);
+      setLogoutFailed(true);
+      setSessionError("No se pudo confirmar el cierre de sesión. Comprueba tu conexión y reintenta.");
+    }
+  }, []);
+
+  useInactivityLogout(() => { void handleLogout("inactivity"); }, !!user && !loggingOut);
 
   useEffect(() => {
-    fetch("/api/auth/me")
-      .then((res) => {
-        if (!res.ok) {
-          router.push("/login");
-          return null;
+    const verify = async () => {
+      if (exiting.current || logoutRequested.current || request.current) return;
+      const controller = new AbortController();
+      request.current = controller;
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store", signal: controller.signal });
+        if (exiting.current || controller.signal.aborted) return;
+        if (res.status === 401) {
+          exiting.current = true;
+          setUser(null);
+          router.replace("/login");
+          return;
         }
-        return res.json();
-      })
-      .then((data) => {
-        if (data?.user) setUser(data.user);
+        if (!res.ok) throw new Error("session check failed");
+        const data = await res.json();
+        if (exiting.current || controller.signal.aborted) return;
+        if (!data.user) throw new Error("invalid session response");
+        setUser(data.user);
+        setSessionError("");
         setLoading(false);
-      })
-      .catch(() => router.push("/login"));
+      } catch {
+        if (!controller.signal.aborted && !exiting.current) {
+          setSessionError("No se pudo comprobar la sesión. Comprueba tu conexión y reintenta.");
+          setLoading(false);
+        }
+      } finally {
+        if (request.current === controller) request.current = null;
+      }
+    };
+    const resume = () => { if (document.visibilityState === "visible" && navigator.onLine) void verify(); };
+    const pageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) { setUser(null); setLoading(true); }
+      resume();
+    };
+    retryCheck.current = () => { setSessionError(""); void verify(); };
+    void verify();
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("pageshow", pageShow);
+    window.addEventListener("online", resume);
+    const channel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("lms_session_events") : null;
+    sessionChannel.current = channel;
+    if (channel) channel.onmessage = (event) => {
+      if (event.data !== "logout" || exiting.current) return;
+      exiting.current = true;
+      request.current?.abort();
+      setUser(null);
+      setLoggingOut(true);
+      window.location.replace("/login");
+    };
+    return () => {
+      request.current?.abort();
+      request.current = null;
+      channel?.close();
+      sessionChannel.current = null;
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("pageshow", pageShow);
+      window.removeEventListener("online", resume);
+    };
   }, [router]);
-
-  async function handleLogout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
-  }
 
   function isActive(href: string) {
     if (href === "/dashboard") return pathname === "/dashboard";
     return pathname.startsWith(href);
   }
 
-  if (loading) {
-    return (
-      <div className="layout-loading">
-        <div className="loading-spinner" />
-      </div>
-    );
+  if (loading || !user || loggingOut) {
+    return <SessionTransition message={loggingOut ? "Cerrando sesión…" : "Verificando sesión…"} error={sessionError} onRetry={logoutFailed ? () => { void handleLogout(); } : () => retryCheck.current()} />;
   }
 
   return (
@@ -221,7 +289,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <span className="sidebar-user-role">{user?.role}</span>
             </div>
           </div>
-          <button className="sidebar-logout" onClick={handleLogout} aria-label="Cerrar sesión">
+          <button className="sidebar-logout" onClick={() => { void handleLogout(); }} aria-label="Cerrar sesión">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
               <polyline points="16 17 21 12 16 7" />

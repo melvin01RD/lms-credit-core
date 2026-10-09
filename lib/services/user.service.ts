@@ -50,7 +50,7 @@ export interface AuthResult {
   };
 }
 
-type SafeUser = Omit<Awaited<ReturnType<typeof prisma.user.findUnique>>, "password"> & {
+type SafeUser = Omit<NonNullable<Awaited<ReturnType<typeof prisma.user.findUnique>>>, "password"> & {
   password?: never;
 };
 

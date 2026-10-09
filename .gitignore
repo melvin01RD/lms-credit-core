@@ -79,6 +79,8 @@ web_modules/
 
 # Next.js build output
 .next
+.next-login-qa
+.next-login-build
 out
 
 # Nuxt.js build / generate output
