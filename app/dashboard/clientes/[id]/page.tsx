@@ -156,7 +156,7 @@ export default function ClientDetailPage() {
             <div className="client-meta">
               <span>{client.documentId}</span>
               <span>•</span>
-              <span>{client.phone}</span>
+              <a href={`tel:${client.phone.replace(/[^+0-9]/g, "")}`}>{client.phone}</a>
               {client.email && <><span>•</span><span>{client.email}</span></>}
             </div>
           </div>

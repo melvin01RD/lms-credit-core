@@ -21,6 +21,7 @@ export default function ChartCard({ title, description, children, actions }: Cha
 
       <style jsx>{`
         .chart-card {
+          min-width: 0;
           background: white;
           border: 1px solid #e5e7eb;
           border-radius: 12px;
@@ -58,6 +59,7 @@ export default function ChartCard({ title, description, children, actions }: Cha
         }
 
         @media (max-width: 640px) {
+          .chart-body { padding: 12px 4px; }
           .chart-header {
             flex-direction: column;
             gap: 12px;

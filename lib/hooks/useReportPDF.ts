@@ -31,7 +31,7 @@ export function useReportPDF(options?: UseReportPDFOptions): UseReportPDFReturn 
     const paramName = PARAM_MAP[type];
     const url = `/api/reports/${type}?${paramName}=${entityId}`;
 
-    const response = await fetch(url);
+    const response = await fetch(url, { cache: "no-store" });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
@@ -59,7 +59,7 @@ export function useReportPDF(options?: UseReportPDFOptions): UseReportPDFReturn 
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (err: any) {
       const msg = err.message || 'Error al descargar el PDF';
       setError(msg);
@@ -70,17 +70,20 @@ export function useReportPDF(options?: UseReportPDFOptions): UseReportPDFReturn 
   }, [fetchPDF, options]);
 
   const previewPDF = useCallback(async (type: ReportType, entityId: string) => {
+    const preview = window.open('about:blank', '_blank');
+    if (!preview) { setError('Permite ventanas emergentes para abrir el PDF.'); return; }
+    preview.opener = null;
     setLoading(true);
     setError(null);
 
     try {
       const blob = await fetchPDF(type, entityId);
       const url = URL.createObjectURL(blob);
-
-      window.open(url, '_blank');
+      preview.location.href = url;
 
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (err: any) {
+      preview.close();
       const msg = err.message || 'Error al previsualizar el PDF';
       setError(msg);
       options?.onError?.(msg);

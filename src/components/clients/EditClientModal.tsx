@@ -116,10 +116,12 @@ export default function EditClientModal({ client, onClose, onUpdated }: EditClie
         <form onSubmit={handleSubmit}>
           <div className="form-row">
             <div className="form-group">
-              <label className="form-label">Nombre *</label>
+              <label className="form-label" htmlFor="edit-firstName">Nombre *</label>
               <input
                 className="form-input"
                 value={form.firstName}
+                id="edit-firstName"
+                autoComplete="given-name"
                 onChange={(e) => updateField('firstName', e.target.value)}
                 required
                 autoFocus
@@ -149,10 +151,13 @@ export default function EditClientModal({ client, onClose, onUpdated }: EditClie
 
           <div className="form-row">
             <div className="form-group">
-              <label className="form-label">Teléfono *</label>
+              <label className="form-label" htmlFor="edit-phone">Teléfono *</label>
               <input
                 className="form-input"
                 value={form.phone}
+                id="edit-phone"
+                type="tel"
+                autoComplete="tel"
                 onChange={(e) => updateField('phone', e.target.value)}
                 required
                 maxLength={10}
@@ -179,7 +184,7 @@ export default function EditClientModal({ client, onClose, onUpdated }: EditClie
               <label className="form-label">Email</label>
               <input
                 className="form-input"
-                type="email"
+                type="email" inputMode="email" autoComplete="email"
                 value={form.email}
                 onChange={(e) => updateField('email', e.target.value)}
               />
@@ -189,6 +194,7 @@ export default function EditClientModal({ client, onClose, onUpdated }: EditClie
               <input
                 className="form-input"
                 value={form.address}
+                autoComplete="street-address"
                 onChange={(e) => updateField('address', e.target.value)}
                 maxLength={50}
               />

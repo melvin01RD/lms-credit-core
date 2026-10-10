@@ -129,6 +129,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useInactivityLogout(() => { void handleLogout("inactivity"); }, !!user && !loggingOut);
 
+  useEffect(() => { setSidebarOpen(false); }, [pathname]);
+
   useEffect(() => {
     const verify = async () => {
       if (exiting.current || logoutRequested.current || request.current) return;
@@ -312,6 +314,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </svg>
           </button>
 
+          <strong className="mobile-section-title">{NAV_ITEMS.find((item) => isActive(item.href) && item.href !== "/dashboard")?.label ?? (pathname.includes("configuracion") ? "Configuración" : pathname.includes("usuarios") ? "Usuarios" : "Dashboard")}</strong>
           <div className="topbar-right">
             <span className="topbar-greeting">
               {user?.firstName} {user?.lastName}
@@ -328,7 +331,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </main>
       </div>
 
+      <nav className="mobile-bottom-nav" aria-label="Navegación móvil">
+        {NAV_ITEMS.slice(0, 5).map((item) => (
+          <Link key={item.href} href={item.href} aria-current={isActive(item.href) ? "page" : undefined} className={isActive(item.href) ? "mobile-nav-active" : ""}>
+            {item.icon}<span>{item.label === "Dashboard" ? "Inicio" : item.label}</span>
+          </Link>
+        ))}
+      </nav>
       <style jsx>{`
+        .mobile-bottom-nav, .mobile-section-title { display: none; }
+        .main-area { min-width: 0; }
+        .sidebar-link, .sidebar-logout { min-height: 44px; }
+        @media (max-width: 768px) {
+          .mobile-bottom-nav { display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 30; background: white; border-top: 1px solid #E0E0F0; padding: 4px max(4px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(4px, env(safe-area-inset-left)); }
+          .mobile-bottom-nav :global(a) { flex: 1; min-width: 44px; min-height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 11px; color: #475569; }
+          .mobile-bottom-nav :global(.mobile-nav-active) { color: #6B21E8; font-weight: 700; background: #f5f3ff; border-radius: 8px; }
+          .mobile-section-title { display: block; font-size: 15px; }
+          .main-content { padding: 16px 12px calc(84px + env(safe-area-inset-bottom)) !important; }
+          .topbar { height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 !important; }
+          .topbar-greeting { display: none !important; }
+          .menu-toggle { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+          .sidebar { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+        }
+
         .layout-loading {
           display: flex;
           align-items: center;

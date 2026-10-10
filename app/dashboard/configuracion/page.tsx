@@ -71,6 +71,7 @@ export default function SettingsPage() {
   }
 
   async function handleSave() {
+    if (saving || !window.confirm("¿Guardar los cambios en la configuración del negocio y sus parámetros?")) return;
     setSaving(true);
     try {
       const payload = {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface Loan {
   id: string;
@@ -20,6 +20,8 @@ interface CreatePaymentModalProps {
 }
 
 export default function CreatePaymentModal({ onClose, onCreated, preselectedLoanId }: CreatePaymentModalProps) {
+  const submitLock = useRef(false);
+  const [confirmationUnknown, setConfirmationUnknown] = useState(false);
   const [form, setForm] = useState({
     loanId: preselectedLoanId || "",
     totalAmount: "",
@@ -115,7 +117,9 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitLock.current || confirmationUnknown) return;
     setError("");
+    if (!navigator.onLine) { setError("Sin conexión. Los pagos requieren confirmación del servidor."); return; }
 
     if (!validateFields()) return;
 
@@ -124,42 +128,47 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
       return;
     }
 
+    if (!window.confirm(`Confirmar pago de RD$ ${Number(form.totalAmount).toLocaleString("es-DO")} para ${selectedLoan?.client.firstName ?? "el cliente"} el ${form.paymentDate}?`)) return;
+    const body = JSON.stringify({ loanId: form.loanId, totalAmount: Number(form.totalAmount), paymentDate: form.paymentDate, type: form.type });
+    submitLock.current = true;
     setSaving(true);
 
     try {
       const res = await fetch("/api/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          loanId: form.loanId,
-          totalAmount: Number(form.totalAmount),
-          paymentDate: form.paymentDate,
-          type: form.type,
-          createdById: userId,
-        }),
+        body,
       });
 
       const data = await res.json();
 
       if (!res.ok) {
+        if (res.status >= 500) {
+          setConfirmationUnknown(true);
+          setError("No se pudo confirmar el resultado. Cierra este formulario y consulta los pagos antes de registrar otro.");
+          return;
+        }
         setError(data.error?.message ?? "Error al registrar el pago");
         return;
       }
 
+      if (!data.payment?.id) { setConfirmationUnknown(true); setError("No se recibió confirmación del servidor. Cierra este formulario y consulta los pagos antes de continuar."); return; }
       onCreated();
     } catch {
-      setError("Error de conexión");
+      setConfirmationUnknown(true);
+      setError("Error de conexión: no se pudo confirmar el resultado. Cierra este formulario y consulta los pagos antes de registrar otro.");
     } finally {
+      submitLock.current = false;
       setSaving(false);
     }
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" onClick={() => { if (!submitLock.current) onClose(); }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Registrar Pago" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2 className="modal-title">Registrar Pago</h2>
-          <button className="modal-close" onClick={onClose}>
+          <button className="modal-close" aria-label="Cerrar" disabled={saving} onClick={() => { if (!submitLock.current) onClose(); }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
@@ -170,6 +179,7 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
         {error && <div className="modal-error">{error}</div>}
 
         <form onSubmit={handleSubmit}>
+          <fieldset disabled={saving || confirmationUnknown} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           {/* Búsqueda de préstamo */}
           <div className="form-group">
             <label className="form-label" htmlFor="loanSearch">Préstamo *</label>
@@ -252,6 +262,7 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
                 id="totalAmount"
                 className="form-input-amount"
                 type="number"
+                inputMode="decimal"
                 step="0.01"
                 min="0"
                 value={form.totalAmount}
@@ -304,7 +315,7 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
           </div>
 
           <div className="modal-actions">
-            <button type="button" className="btn-secondary" onClick={onClose}>
+            <button type="button" className="btn-secondary" onClick={() => { if (!submitLock.current) onClose(); }}>
               Cancelar
             </button>
             <button
@@ -319,6 +330,7 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
               {saving ? "Registrando..." : "Registrar Pago"}
             </button>
           </div>
+          </fieldset>
         </form>
 
         <style jsx>{`
@@ -572,6 +584,10 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
             line-height: 1.3;
           }
 
+          @media (max-width: 768px) {
+            .modal-overlay { padding: 0; }
+            .modal { max-width: none; height: 100dvh; max-height: 100dvh; border-radius: 0; padding: calc(16px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom)); }
+          }
           @media (max-width: 500px) {
             .form-row {
               grid-template-columns: 1fr;

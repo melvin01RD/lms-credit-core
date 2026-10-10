@@ -165,12 +165,16 @@ export default function LoginPage() {
               </svg>
               <input
                 id="email"
-                type="text"
+                name="email"
+                inputMode="email"
+                autoCapitalize="none"
+                spellCheck={false}
+                type="email"
                 className="form-input"
                 placeholder="usuario@ejemplo.com"
                 value={email}
                 onChange={(e) => { setEmail(e.target.value); setInactivityNotice(false); }}
-                autoComplete="off"
+                autoComplete="username"
                 autoFocus
               />
             </div>
@@ -187,12 +191,13 @@ export default function LoginPage() {
               </svg>
               <input
                 id="password"
+                name="password"
                 type={showPassword ? "text" : "password"}
                 className="form-input"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); setInactivityNotice(false); }}
-                autoComplete="off"
+                autoComplete="current-password"
               />
               <button
                 type="button"

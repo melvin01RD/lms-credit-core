@@ -16,7 +16,8 @@
     "test:e2e:report": "playwright show-report",
     "test:e2e:auth": "playwright test e2e/01-autenticacion.spec.ts --headed",
     "test:e2e:seguridad": "playwright test e2e/07-seguridad.spec.ts e2e/08-rbac.spec.ts --headed",
-    "test:e2e:ci": "playwright test --reporter=github"
+    "test:e2e:ci": "playwright test --reporter=github",
+    "test:e2e:mobile": "playwright test --config playwright.mobile.config.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",

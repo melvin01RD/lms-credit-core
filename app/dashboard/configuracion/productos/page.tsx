@@ -65,6 +65,7 @@ export default function ProductosPage() {
   async function handleToggle(product: LoanProduct) {
     setToggling(product.id);
     try {
+      if (!window.confirm(`¿Cambiar el estado del producto ${product.name}?`)) return;
       const res = await fetch(`/api/loan-products/${product.id}/toggle`, { method: "PATCH" });
       if (res.ok) {
         showToast(product.active ? "Producto desactivado" : "Producto activado");
@@ -97,7 +98,7 @@ export default function ProductosPage() {
         </button>
       </div>
 
-      <div className="table-container">
+      <div className="table-container admin-mobile-table">
         <table className="table">
           <thead>
             <tr>
@@ -118,18 +119,18 @@ export default function ProductosPage() {
               <tr><td colSpan={8} className="table-empty">No hay productos registrados</td></tr>
             ) : products.map((p) => (
               <tr key={p.id} className={p.active ? "" : "row-inactive"}>
-                <td className="td-bold">{p.name}</td>
-                <td>{Number(p.defaultRate).toFixed(2)}%</td>
-                <td>{FREQUENCY_LABELS[p.paymentFrequency] ?? p.paymentFrequency}</td>
-                <td>{p.termCount}</td>
-                <td className="td-secondary">{fmtMoney(p.minAmount)}</td>
-                <td className="td-secondary">{fmtMoney(p.maxAmount)}</td>
-                <td>
+                <td data-label="Nombre" className="td-bold">{p.name}</td>
+                <td data-label="Tasa">{Number(p.defaultRate).toFixed(2)}%</td>
+                <td data-label="Frecuencia">{FREQUENCY_LABELS[p.paymentFrequency] ?? p.paymentFrequency}</td>
+                <td data-label="Cuotas">{p.termCount}</td>
+                <td data-label="Monto mínimo" className="td-secondary">{fmtMoney(p.minAmount)}</td>
+                <td data-label="Monto máximo" className="td-secondary">{fmtMoney(p.maxAmount)}</td>
+                <td data-label="Estado">
                   <span className={`status-badge ${p.active ? "badge-active" : "badge-inactive"}`}>
                     {p.active ? "Activo" : "Inactivo"}
                   </span>
                 </td>
-                <td>
+                <td data-label="Acciones">
                   <div className="row-actions">
                     <button
                       className="btn-icon"

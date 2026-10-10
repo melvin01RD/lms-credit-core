@@ -32,7 +32,7 @@ export default function UsersPage() {
   useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => r.json())
-      .then((d) => setCurrentUserId(d?.id ?? null))
+      .then((d) => setCurrentUserId(d?.user?.userId ?? null))
       .catch(() => null);
   }, []);
 
@@ -175,7 +175,7 @@ export default function UsersPage() {
       </div>
 
       {/* Table */}
-      <div className="table-container">
+      <div className="table-container admin-mobile-table">
         <table className="table">
           <thead>
             <tr>
@@ -197,7 +197,7 @@ export default function UsersPage() {
             ) : (
               users.map((user) => (
                 <tr key={user.id} className="table-row">
-                  <td>
+                  <td data-label="Nombre">
                     <div className="user-name">
                       <div className="user-avatar">
                         {user.firstName[0]}{user.lastName?.[0] ?? ""}
@@ -208,19 +208,19 @@ export default function UsersPage() {
                       )}
                     </div>
                   </td>
-                  <td className="td-secondary">{user.email}</td>
-                  <td>
+                  <td data-label="Correo" className="td-secondary">{user.email}</td>
+                  <td data-label="Rol">
                     <span className={`role-badge ${user.role === "ADMIN" ? "role-admin" : "role-operator"}`}>
                       {user.role}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="Estado">
                     <span className={`status-badge ${user.active ? "active" : "inactive"}`}>
                       {user.active ? "Activo" : "Inactivo"}
                     </span>
                   </td>
-                  <td className="td-date">{formatDate(user.createdAt)}</td>
-                  <td>
+                  <td data-label="Creado" className="td-date">{formatDate(user.createdAt)}</td>
+                  <td data-label="Acciones">
                     <div className="action-buttons">
                       <button
                         className="btn-action btn-edit"
@@ -357,13 +357,15 @@ export default function UsersPage() {
 
         .filters-row {
           display: flex;
+          flex-wrap: wrap;
           gap: 10px;
           margin-bottom: 16px;
           align-items: center;
         }
         .search-bar {
           position: relative;
-          flex: 1;
+          flex: 1 1 220px;
+          min-width: 0;
         }
         .search-icon {
           position: absolute;

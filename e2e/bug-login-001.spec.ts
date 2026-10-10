@@ -150,9 +150,9 @@ test('logout synchronizes other tabs without a second POST', async ({ page, cont
   expect(calls).toBe(1);
 });
 
-test('real JWT cookies, RBAC and expiry are preserved without database access', async ({ context, request }) => {
+test('real JWT cookies, RBAC and expiry are preserved without database access', async ({ context, request, baseURL }) => {
   expect((await request.get('/api/auth/me')).status()).toBe(401);
-  await context.addCookies([{ name: 'lms_session', value: sessionToken(), url: 'http://localhost:3101', httpOnly: true, sameSite: 'Lax' }]);
+  await context.addCookies([{ name: 'lms_session', value: sessionToken(), url: baseURL!, httpOnly: true, sameSite: 'Lax' }]);
   const me = await context.request.get('/api/auth/me');
   expect(me.status()).toBe(200);
   expect(me.headers()['cache-control']).toContain('no-store');
@@ -161,15 +161,15 @@ test('real JWT cookies, RBAC and expiry are preserved without database access', 
   expect((await context.request.post('/api/auth/logout')).status()).toBe(200);
   expect((await context.cookies()).find((cookie) => cookie.name === 'lms_session')).toBeUndefined();
   expect((await context.request.get('/api/auth/me')).status()).toBe(401);
-  await context.addCookies([{ name: 'lms_session', value: sessionToken(Math.floor(Date.now() / 1000) - 601), url: 'http://localhost:3101', httpOnly: true }]);
+  await context.addCookies([{ name: 'lms_session', value: sessionToken(Math.floor(Date.now() / 1000) - 601), url: baseURL!, httpOnly: true }]);
   const expired = await context.request.get('/api/auth/me');
   expect(expired.status()).toBe(401);
   expect((await expired.json()).error.code).toBe('SESSION_EXPIRED');
 });
 
-test('real logout protects browser history without a service worker', async ({ page, context }) => {
+test('real logout protects browser history without a service worker', async ({ page, context, baseURL }) => {
   await page.unroute('**/api/**');
-  await context.addCookies([{ name: 'lms_session', value: sessionToken(), url: 'http://localhost:3101', httpOnly: true, sameSite: 'Lax' }]);
+  await context.addCookies([{ name: 'lms_session', value: sessionToken(), url: baseURL!, httpOnly: true, sameSite: 'Lax' }]);
   const response = await page.goto('/dashboard/unauthorized');
   expect(response?.headers()['cache-control']).toContain('no-store');
   await expect(page.locator('.layout-container')).toBeVisible();
@@ -182,6 +182,42 @@ test('real logout protects browser history without a service worker', async ({ p
   await page.goBack();
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.locator('.layout-container')).toHaveCount(0);
+});
+
+test.describe('PWA with the real service worker', () => {
+  test.use({ serviceWorkers: 'allow' });
+  test('logout and offline history cannot recover private cached content', async ({ page, context, browserName, baseURL }, info) => {
+    await page.unroute('**/api/**');
+    await page.goto('/login');
+    await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+    await context.addCookies([{ name: 'lms_session', value: sessionToken(), url: baseURL!, httpOnly: true, sameSite: 'Lax' }]);
+    // This protected page requires a real session but does not query business data.
+    await page.goto('/dashboard/unauthorized');
+    await expect(page.locator('.layout-container')).toBeVisible();
+    await page.goto('/dashboard/unauthorized?history=1');
+    await expect(page.locator('.layout-container')).toBeVisible();
+    await (await logoutButton(page)).click();
+    await expect(page).toHaveURL(/\/login$/);
+    expect((await context.request.get('/api/auth/me')).status()).toBe(401);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.locator('.layout-container')).toHaveCount(0);
+    const paths = await page.evaluate(async () => (await Promise.all((await caches.keys()).map(async (name) => (await (await caches.open(name)).keys()).map((request) => new URL(request.url).pathname)))).flat());
+    expect(paths.sort()).toEqual(['/offline.html', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-512.png', '/icons/apple-touch-icon.png'].sort());
+    await context.setOffline(true);
+    const navigationError = await page.goto('/dashboard/unauthorized').then(() => null, (error: Error) => error);
+    if (navigationError) {
+      // WebKit's offline emulation can reject navigation before the SW runs.
+      // Keep asserting privacy; do not claim its offline landing page was tested.
+      expect(browserName).toBe('webkit');
+      expect(navigationError.message).toContain('WebKit encountered an internal error');
+      info.annotations.push({ type: 'limitation', description: 'WebKit offline navigation: https://github.com/microsoft/playwright/issues/42775. Private-cache checks passed; offline fallback could not render.' });
+    } else {
+      await expect(page.getByRole('heading', { name: 'Sin conexión' })).toBeVisible();
+    }
+    await expect(page.locator('.layout-container')).toHaveCount(0);
+    await context.setOffline(false);
+  });
 });
 
 test('rapid login submissions share one request and keep the pending state', async ({ page }) => {

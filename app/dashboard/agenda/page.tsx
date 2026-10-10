@@ -73,13 +73,21 @@ export default function AgendaPage() {
   const [selectedDay, setSelectedDay] = useState<DayOfWeek>(todayEnum());
   const [data, setData] = useState<AgendaData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const fetchAgenda = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
       const res = await fetch(`/api/agenda?day=${selectedDay}`);
       const json = await res.json();
+      if (!res.ok) throw new Error("No se pudo cargar la agenda");
+      const priority = (client: AgendaClient) => Math.min(...client.loans.map((loan) => loan.status === "OVERDUE" ? 0 : loan.nextDueDate ? new Date(loan.nextDueDate).getTime() : Infinity));
+      json.clients.sort((a: AgendaClient, b: AgendaClient) => priority(a) - priority(b));
       setData(json);
+    } catch {
+      setData(null);
+      setError("No se pudo cargar la agenda. Comprueba tu conexión e intenta de nuevo.");
     } finally {
       setLoading(false);
     }
@@ -127,6 +135,7 @@ export default function AgendaPage() {
       </div>
 
       {/* Content */}
+      {error && <p role="alert">{error} <button onClick={fetchAgenda}>Reintentar</button></p>}
       {loading ? (
         <div className="empty-state">Cargando...</div>
       ) : !data?.clients.length ? (
@@ -146,7 +155,7 @@ export default function AgendaPage() {
                     <Link href={`/dashboard/clientes/${client.id}`} className="client-name-link">
                       {client.firstName} {client.lastName ?? ""}
                     </Link>
-                    <div className="client-sub">{client.phone} · {client.documentId}</div>
+                    <div className="client-sub"><a href={`tel:${client.phone.replace(/[^+0-9]/g, "")}`}>{client.phone}</a> · {client.documentId}</div>
                   </div>
                 </div>
                 <div className="client-total">
@@ -166,7 +175,7 @@ export default function AgendaPage() {
                       <th>Cuota</th>
                       <th>Pendiente</th>
                       <th>Estado</th>
-                      <th>Cobrador</th>
+                      <th>Acción</th><th>Cobrador</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -185,6 +194,7 @@ export default function AgendaPage() {
                             {STATUS_LABELS[loan.status] ?? loan.status}
                           </span>
                         </td>
+                        <td><Link href={`/dashboard/pagos?loanId=${loan.id}`} className="loan-link">Registrar pago</Link></td>
                         <td className="td-secondary">
                           {loan.createdBy.firstName} {loan.createdBy.lastName}
                         </td>
