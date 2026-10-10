@@ -21,6 +21,7 @@ interface CreatePaymentModalProps {
 
 export default function CreatePaymentModal({ onClose, onCreated, preselectedLoanId }: CreatePaymentModalProps) {
   const submitLock = useRef(false);
+  const submission = useRef<{ body: string; key: string } | null>(null);
   const [confirmationUnknown, setConfirmationUnknown] = useState(false);
   const [form, setForm] = useState({
     loanId: preselectedLoanId || "",
@@ -130,13 +131,14 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
 
     if (!window.confirm(`Confirmar pago de RD$ ${Number(form.totalAmount).toLocaleString("es-DO")} para ${selectedLoan?.client.firstName ?? "el cliente"} el ${form.paymentDate}?`)) return;
     const body = JSON.stringify({ loanId: form.loanId, totalAmount: Number(form.totalAmount), paymentDate: form.paymentDate, type: form.type });
+    if (submission.current?.body !== body) submission.current = { body, key: crypto.randomUUID() };
     submitLock.current = true;
     setSaving(true);
 
     try {
       const res = await fetch("/api/payments", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": submission.current.key },
         body,
       });
 
@@ -235,7 +237,7 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
                 </span>
               </div>
               <div className="info-row">
-                <span className="info-label">Saldo pendiente:</span>
+                <span className="info-label">Cuotas pendientes (sin mora):</span>
                 <span className="info-value info-value-amount">
                   RD$ {Number(selectedLoan.remainingCapital).toLocaleString("es-DO", {
                     minimumFractionDigits: 2
@@ -270,11 +272,10 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
                 placeholder="0.00"
               />
             </div>
-            {selectedLoan && form.totalAmount && Number(form.totalAmount) > Number(selectedLoan.remainingCapital) && (
-              <small className="warning-note">
-                El monto excede el saldo pendiente
-              </small>
-            )}
+            <small className="warning-note">
+              Incluya toda la mora pendiente y el importe exacto de las cuotas completas que desea pagar.
+              El servidor verifica el saldo, la mora y el ajuste de la última cuota.
+            </small>
             {fieldErrors.totalAmount && (
               <span className="field-error" role="alert">{fieldErrors.totalAmount}</span>
             )}
@@ -323,8 +324,7 @@ export default function CreatePaymentModal({ onClose, onCreated, preselectedLoan
               className="btn-primary"
               disabled={
                 saving ||
-                !form.loanId ||
-                (!!selectedLoan && !!form.totalAmount && Number(form.totalAmount) > Number(selectedLoan.remainingCapital))
+                !form.loanId
               }
             >
               {saving ? "Registrando..." : "Registrar Pago"}

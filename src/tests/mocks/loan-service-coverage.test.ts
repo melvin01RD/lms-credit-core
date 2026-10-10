@@ -89,62 +89,35 @@ describe("getOverdueLoans", () => {
 
 describe("processOverdueLoans", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    prismaMock.$queryRaw.mockResolvedValue([]);
+    prismaMock.$transaction.mockImplementation(async callback => callback(prismaMock));
+    prismaMock.auditLog.create.mockResolvedValue({ id: "audit" });
   });
-
-  it("actualiza cuotas del schedule y préstamos a OVERDUE", async () => {
-    prismaMock.paymentSchedule.updateMany.mockResolvedValue({ count: 3 });
-    prismaMock.loan.updateMany.mockResolvedValue({ count: 3 });
-
-    const result = await processOverdueLoans("user-1");
-
-    expect(result.affected).toBe(3);
-    expect(prismaMock.paymentSchedule.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ status: ScheduleStatus.PENDING }),
-        data: { status: ScheduleStatus.OVERDUE },
-      })
-    );
-    expect(prismaMock.loan.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ status: LoanStatus.ACTIVE }),
-        data: expect.objectContaining({ status: LoanStatus.OVERDUE, updatedById: "user-1" }),
-      })
-    );
+  it("locks each loan before marking its installments and state", async () => {
+    prismaMock.loan.findMany.mockResolvedValue([{ id: "loan-1" }]);
+    prismaMock.loan.findUnique.mockResolvedValue(createMockFlatRateLoan({ id: "loan-1" }));
+    prismaMock.paymentSchedule.updateMany.mockResolvedValue({ count: 2 });
+    expect(await processOverdueLoans("user-1")).toEqual({ affected: 1 });
+    expect(prismaMock.paymentSchedule.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ loanId: "loan-1", status: "PENDING" }) }));
+    expect(prismaMock.loan.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: "OVERDUE", updatedById: "user-1" } }));
+    expect(prismaMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(prismaMock.paymentSchedule.updateMany.mock.invocationCallOrder[0]);
   });
-
-  it("retorna affected: 0 si no hay préstamos vencidos", async () => {
+  it("returns zero for an empty batch", async () => {
+    prismaMock.loan.findMany.mockResolvedValue([]);
+    expect(await processOverdueLoans("user-1")).toEqual({ affected: 0 });
+  });
+  it("revalidates canceled loans after locking", async () => {
+    prismaMock.loan.findMany.mockResolvedValue([{ id: "loan-1" }]);
+    prismaMock.loan.findUnique.mockResolvedValue(createMockFlatRateLoan({ status: "CANCELED" }));
+    expect(await processOverdueLoans("user-1")).toEqual({ affected: 0 });
+    expect(prismaMock.paymentSchedule.updateMany).not.toHaveBeenCalled();
+  });
+  it("does not mark a loan whose pending installments were paid while waiting", async () => {
+    prismaMock.loan.findMany.mockResolvedValue([{ id: "loan-1" }]);
+    prismaMock.loan.findUnique.mockResolvedValue(createMockFlatRateLoan());
     prismaMock.paymentSchedule.updateMany.mockResolvedValue({ count: 0 });
-    prismaMock.loan.updateMany.mockResolvedValue({ count: 0 });
-
-    const result = await processOverdueLoans("user-1");
-
-    expect(result.affected).toBe(0);
-  });
-
-  it("actualiza schedule ANTES de los loans (orden correcto)", async () => {
-    const callOrder: string[] = [];
-
-    prismaMock.paymentSchedule.updateMany.mockImplementation(async () => {
-      callOrder.push("schedule");
-      return { count: 2 };
-    });
-    prismaMock.loan.updateMany.mockImplementation(async () => {
-      callOrder.push("loan");
-      return { count: 2 };
-    });
-
-    await processOverdueLoans("user-1");
-
-    expect(callOrder).toEqual(["schedule", "loan"]);
-  });
-
-  it("el resultado refleja el count de loans actualizados (no de schedule)", async () => {
-    prismaMock.paymentSchedule.updateMany.mockResolvedValue({ count: 10 });
-    prismaMock.loan.updateMany.mockResolvedValue({ count: 7 });
-
-    const result = await processOverdueLoans("user-1");
-
-    expect(result.affected).toBe(7);
+    expect(await processOverdueLoans("user-1")).toEqual({ affected: 0 });
+    expect(prismaMock.loan.update).not.toHaveBeenCalled();
   });
 });

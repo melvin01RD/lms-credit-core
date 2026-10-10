@@ -70,6 +70,7 @@ model User {
   payments        Payment[]
   auditLogs       AuditLog[]
   systemConfigs   SystemConfig[]
+  paymentIdempotency PaymentIdempotency[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -77,12 +78,12 @@ model User {
 
 model Client {
   id         String  @id @default(uuid())
-  firstName  String
-  lastName   String?
-  documentId String  @unique
-  phone      String
+  firstName  String   @db.VarChar(25)
+  lastName   String?  @db.VarChar(25)
+  documentId String  @unique @db.VarChar(11)
+  phone      String  @db.VarChar(10)
   email      String?
-  address    String?
+  address    String? @db.VarChar(50)
   currency       String      @default("DOP")
   active         Boolean     @default(true)
   collectionDays DayOfWeek[] @default([])
@@ -160,6 +161,12 @@ model Payment {
 
   createdAt DateTime @default(now())
 
+  reversesPaymentId String? @unique
+  reversalReason String?
+  reversesPayment Payment? @relation("PaymentReversal", fields: [reversesPaymentId], references: [id], onDelete: Restrict)
+  reversedBy Payment? @relation("PaymentReversal")
+  lateFeeAllocations PaymentLateFeeAllocation[]
+
   @@index([loanId])
 }
 
@@ -177,11 +184,37 @@ model PaymentSchedule {
 
   loan    Loan     @relation(fields: [loanId], references: [id])
   payment Payment? @relation(fields: [paymentId], references: [id])
+  lateFeeAllocations PaymentLateFeeAllocation[]
 
   createdAt DateTime @default(now())
 
   @@index([loanId])
   @@index([status])
+  @@unique([loanId, installmentNumber])
+}
+
+model PaymentIdempotency {
+  userId String
+  operation String
+  key String
+  fingerprint String
+  result Json?
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@id([userId, operation, key])
+}
+
+// Immutable signed allocations: a reversal appends the negative of each original allocation.
+model PaymentLateFeeAllocation {
+  paymentId String
+  scheduleId String
+  amount Decimal @db.Decimal(12, 2)
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  schedule PaymentSchedule @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
+
+  @@id([paymentId, scheduleId])
+  @@index([scheduleId])
 }
 
 enum DayOfWeek {

@@ -5,10 +5,11 @@ import { LoanNotFoundError, PaymentNotAllowedError } from "../../../lib/errors";
 import { LoanStatus } from "@prisma/client";
 import { prismaMock } from "./prisma.mock";
 import { createMockLoan } from "./test-factories";
+import { financialFixture } from "./financial-fixture";
 
 describe("cancelLoan", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    financialFixture();
   });
 
   it("should cancel an ACTIVE loan", async () => {
@@ -48,7 +49,7 @@ describe("cancelLoan", () => {
 
 describe("markLoanAsOverdue", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    financialFixture();
   });
 
   it("should mark ACTIVE loan as OVERDUE", async () => {

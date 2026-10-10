@@ -3,6 +3,7 @@ import "./setup";
 import { POST as payments } from "@/app/api/payments/route";
 import { POST as loanPayments } from "@/app/api/loans/[id]/payments/route";
 import { createPayment } from "@/lib/services";
+import { ServiceError } from "@/lib/errors";
 
 describe.each([
   ["/api/payments", payments],
@@ -16,6 +17,16 @@ describe.each([
   beforeEach(() => {
     vi.mocked(createPayment).mockReset();
     vi.mocked(createPayment).mockResolvedValue({ payment: { id: "p" } } as never);
+  });
+  it("passes the header key to the service and maps conflicts to HTTP 409", async () => {
+    vi.mocked(createPayment).mockRejectedValue(new ServiceError("Conflicto", "IDEMPOTENCY_CONFLICT", 409));
+    const response = await post(new Request(`http://localhost${url}`, { method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "contract-retry-001" },
+      body: JSON.stringify({ loanId: "loan-1", totalAmount: 1000 }),
+    }), { params: Promise.resolve({ id: "loan-1" }) });
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe("IDEMPOTENCY_CONFLICT");
+    expect(createPayment).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: "contract-retry-001" }));
   });
   it.each([undefined, "forged-user"])("uses the session actor regardless of supplied identity (%s)", async (createdById) => {
     const response = await send({ loanId: "loan-1", totalAmount: 1000, createdById });

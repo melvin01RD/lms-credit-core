@@ -16,6 +16,8 @@ import {
 } from "../domain/flatRateCalculator";
 import { PaginationOptions, PaginatedResult } from "../types";
 import { auditLog, AuditAction, AuditEntity } from "./audit.service";
+import { financialTransaction, lockLoan } from "./financial-transaction";
+import { financialDayStart } from "../domain/financial-calendar";
 
 // ============================================
 // INTERFACES
@@ -148,24 +150,23 @@ export async function createLoan(data: CreateLoanInput) {
  * Solo puede ser llamado por un ADMIN.
  */
 export async function activateLoan(loanId: string, userId: string) {
-  const loan = await prisma.loan.findUnique({ where: { id: loanId } });
-  if (!loan) throw new LoanNotFoundError(loanId);
-  if (loan.status !== LoanStatus.DRAFT) {
-    throw new Error(`Solo préstamos en borrador pueden activarse. Estado actual: ${loan.status}`);
-  }
+  return financialTransaction(async tx => {
+    const loan = await lockLoan(tx, loanId);
+    if (loan.status !== LoanStatus.DRAFT) {
+      throw new Error(`Solo préstamos en borrador pueden activarse. Estado actual: ${loan.status}`);
+    }
 
-  const calc = calculateFlatRateLoan({
-    principalAmount: Number(loan.principalAmount),
-    totalFinanceCharge: Number(loan.totalFinanceCharge ?? 0),
-    termCount: loan.termCount,
-    paymentFrequency: loan.paymentFrequency,
-    startDate: new Date(),
-  });
+    const calc = calculateFlatRateLoan({
+      principalAmount: Number(loan.principalAmount),
+      totalFinanceCharge: Number(loan.totalFinanceCharge ?? 0),
+      termCount: loan.termCount,
+      paymentFrequency: loan.paymentFrequency,
+      startDate: new Date(),
+    });
 
-  const nextDueDate = calc.schedule[0]?.dueDate ?? null;
+    const nextDueDate = calc.schedule[0]?.dueDate ?? null;
 
-  const activatedLoan = await prisma.$transaction(async (tx) => {
-    const updated = await tx.loan.update({
+    const activatedLoan = await tx.loan.update({
       where: { id: loanId },
       data: {
         status: LoanStatus.ACTIVE,
@@ -180,17 +181,20 @@ export async function activateLoan(loanId: string, userId: string) {
 
     await createPaymentScheduleInTx(tx, loanId, calc.schedule);
 
-    return updated;
-  });
 
-  await auditLog(userId, AuditAction.ACTIVATE_LOAN, AuditEntity.LOAN, loanId, {
-    previousStatus: "DRAFT",
-    nextDueDate,
-    installmentAmount: calc.installmentAmount,
-    termCount: loan.termCount,
-  });
+    await tx.auditLog.create({
+      data: {
+        userId, action: AuditAction.ACTIVATE_LOAN, entity: AuditEntity.LOAN, entityId: loanId, details: {
+          previousStatus: "DRAFT",
+          nextDueDate: nextDueDate?.toISOString() ?? null,
+          installmentAmount: calc.installmentAmount,
+          termCount: loan.termCount,
+        }
+      }
+    });
 
-  return activatedLoan;
+    return activatedLoan;
+  });
 }
 
 /**
@@ -198,19 +202,24 @@ export async function activateLoan(loanId: string, userId: string) {
  * No puede eliminar préstamos en otros estados.
  */
 export async function deleteDraftLoan(loanId: string, userId: string) {
-  const loan = await prisma.loan.findUnique({ where: { id: loanId } });
-  if (!loan) throw new LoanNotFoundError(loanId);
-  if (loan.status !== LoanStatus.DRAFT) {
-    throw new Error(`Solo borradores pueden eliminarse. Estado actual: ${loan.status}`);
-  }
+  return financialTransaction(async tx => {
+    const loan = await lockLoan(tx, loanId);
+    if (loan.status !== LoanStatus.DRAFT) {
+      throw new Error(`Solo borradores pueden eliminarse. Estado actual: ${loan.status}`);
+    }
 
-  await auditLog(userId, AuditAction.DELETE_DRAFT_LOAN, AuditEntity.LOAN, loanId, {
-    clientId: loan.clientId,
-    principalAmount: Number(loan.principalAmount),
-    createdAt: loan.createdAt,
+    await tx.auditLog.create({
+      data: {
+        userId, action: AuditAction.DELETE_DRAFT_LOAN, entity: AuditEntity.LOAN, entityId: loanId, details: {
+          clientId: loan.clientId,
+          principalAmount: Number(loan.principalAmount),
+          createdAt: loan.createdAt.toISOString(),
+        }
+      }
+    });
+
+    await tx.loan.delete({ where: { id: loanId } });
   });
-
-  await prisma.loan.delete({ where: { id: loanId } });
 }
 
 /**
@@ -252,27 +261,29 @@ export async function approveViaToken(token: string, clientSignature: string) {
     throw new ServiceError("Debe ingresar su nombre completo para confirmar", "MISSING_SIGNATURE", 400);
   }
 
-  const loan = await prisma.loan.findUnique({ where: { approvalToken: token } });
-  if (!loan) throw new TokenNotFoundError();
+  return financialTransaction(async tx => {
+    const reference = await tx.loan.findUnique({ where: { approvalToken: token } });
+    if (!reference) throw new TokenNotFoundError();
+    const loan = await lockLoan(tx, reference.id);
+    if (loan.approvalToken !== token) throw new TokenAlreadyUsedError();
 
-  if (!loan.approvalTokenExp || loan.approvalTokenExp < new Date()) {
-    throw new TokenExpiredError();
-  }
-  if (loan.status !== LoanStatus.DRAFT) {
-    throw new TokenAlreadyUsedError();
-  }
+    if (!loan.approvalTokenExp || loan.approvalTokenExp < new Date()) {
+      throw new TokenExpiredError();
+    }
+    if (loan.status !== LoanStatus.DRAFT) {
+      throw new TokenAlreadyUsedError();
+    }
 
-  const calc = calculateFlatRateLoan({
-    principalAmount: Number(loan.principalAmount),
-    totalFinanceCharge: Number(loan.totalFinanceCharge ?? 0),
-    termCount: loan.termCount,
-    paymentFrequency: loan.paymentFrequency,
-    startDate: new Date(),
-  });
+    const calc = calculateFlatRateLoan({
+      principalAmount: Number(loan.principalAmount),
+      totalFinanceCharge: Number(loan.totalFinanceCharge ?? 0),
+      termCount: loan.termCount,
+      paymentFrequency: loan.paymentFrequency,
+      startDate: new Date(),
+    });
 
-  const nextDueDate = calc.schedule[0]?.dueDate ?? null;
+    const nextDueDate = calc.schedule[0]?.dueDate ?? null;
 
-  await prisma.$transaction(async (tx) => {
     await tx.loan.update({
       where: { id: loan.id },
       data: {
@@ -285,19 +296,23 @@ export async function approveViaToken(token: string, clientSignature: string) {
       },
     });
     await createPaymentScheduleInTx(tx, loan.id, calc.schedule);
-  });
 
-  await auditLog(loan.createdById, AuditAction.ACTIVATE_LOAN, AuditEntity.LOAN, loan.id, {
-    method: "CLIENT_APPROVAL_TOKEN",
-    clientSignature: clientSignature.trim(),
-    nextDueDate: nextDueDate?.toISOString() ?? null,
-  });
+    await tx.auditLog.create({
+      data: {
+        userId: loan.createdById, action: AuditAction.ACTIVATE_LOAN, entity: AuditEntity.LOAN, entityId: loan.id, details: {
+          method: "CLIENT_APPROVAL_TOKEN",
+          clientSignature: clientSignature.trim(),
+          nextDueDate: nextDueDate?.toISOString() ?? null,
+        }
+      }
+    });
 
-  return {
-    clientName: clientSignature.trim(),
-    loanId: loan.id,
-    nextDueDate: nextDueDate?.toISOString() ?? null,
-  };
+    return {
+      clientName: clientSignature.trim(),
+      loanId: loan.id,
+      nextDueDate: nextDueDate?.toISOString() ?? null,
+    };
+  });
 }
 
 // ============================================
@@ -377,14 +392,14 @@ export async function getLoans(
 
   const where: Prisma.LoanWhereInput = {};
 
-  if (filters?.clientId)      where.clientId = filters.clientId;
+  if (filters?.clientId) where.clientId = filters.clientId;
   if (filters?.status) {
     where.status = Array.isArray(filters.status)
       ? { in: filters.status }
       : filters.status;
   }
   if (filters?.loanStructure) where.loanStructure = filters.loanStructure;
-  if (filters?.createdById)   where.createdById = filters.createdById;
+  if (filters?.createdById) where.createdById = filters.createdById;
 
   if (filters?.search) {
     const searchTerm = filters.search.trim();
@@ -426,34 +441,39 @@ export async function getLoans(
 }
 
 export async function cancelLoan(loanId: string, userId: string) {
-  const loan = await prisma.loan.findUnique({ where: { id: loanId } });
-  if (!loan) throw new LoanNotFoundError(loanId);
-  if (loan.status === LoanStatus.PAID) throw new PaymentNotAllowedError(loanId, loan.status);
-  if (loan.status === LoanStatus.CANCELED) throw new Error("El préstamo ya está cancelado");
+  return financialTransaction(async tx => {
+    const loan = await lockLoan(tx, loanId);
+    if (loan.status === LoanStatus.PAID) throw new PaymentNotAllowedError(loanId, loan.status);
+    if (loan.status === LoanStatus.CANCELED) throw new ServiceError("El préstamo ya está cancelado", "LOAN_ALREADY_CANCELED", 409);
 
-  const canceledLoan = await prisma.loan.update({
-    where: { id: loanId },
-    data: { status: LoanStatus.CANCELED, updatedById: userId },
+    const canceledLoan = await tx.loan.update({
+      where: { id: loanId },
+      data: { status: LoanStatus.CANCELED, updatedById: userId },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId, action: AuditAction.CANCEL_LOAN, entity: AuditEntity.LOAN, entityId: loanId, details: {
+          previousStatus: loan.status,
+          remainingCapital: Number(loan.remainingCapital),
+        }
+      }
+    });
+    return canceledLoan;
   });
-
-  await auditLog(userId, AuditAction.CANCEL_LOAN, AuditEntity.LOAN, loanId, {
-    previousStatus: loan.status,
-    remainingCapital: Number(loan.remainingCapital),
-  });
-
-  return canceledLoan;
 }
 
 export async function markLoanAsOverdue(loanId: string, userId: string) {
-  const loan = await prisma.loan.findUnique({ where: { id: loanId } });
-  if (!loan) throw new LoanNotFoundError(loanId);
-  if (loan.status !== LoanStatus.ACTIVE) {
-    throw new Error(`Solo préstamos ACTIVE pueden marcarse como OVERDUE. Estado actual: ${loan.status}`);
-  }
+  return financialTransaction(async tx => {
+    const loan = await lockLoan(tx, loanId);
+    if (loan.status !== LoanStatus.ACTIVE) {
+      throw new Error(`Solo préstamos ACTIVE pueden marcarse como OVERDUE. Estado actual: ${loan.status}`);
+    }
 
-  return prisma.loan.update({
-    where: { id: loanId },
-    data: { status: LoanStatus.OVERDUE, updatedById: userId },
+    return tx.loan.update({
+      where: { id: loanId },
+      data: { status: LoanStatus.OVERDUE, updatedById: userId },
+    });
   });
 }
 
@@ -484,12 +504,12 @@ export async function getLoanSummary(loanId: string) {
     _count: true,
   });
 
-  const principalAmount    = Number(loan.principalAmount);
-  const remainingCapital   = Number(loan.remainingCapital);
-  const totalPaid          = Number(payments._sum.totalAmount ?? 0);
-  const capitalPaid        = Number(payments._sum.capitalApplied ?? 0);
-  const interestPaid       = Number(payments._sum.interestApplied ?? 0);
-  const lateFeesPaid       = Number(payments._sum.lateFeeApplied ?? 0);
+  const principalAmount = Number(loan.principalAmount);
+  const remainingCapital = Number(loan.remainingCapital);
+  const totalPaid = Number(payments._sum.totalAmount ?? 0);
+  const capitalPaid = Number(payments._sum.capitalApplied ?? 0);
+  const interestPaid = Number(payments._sum.interestApplied ?? 0);
+  const lateFeesPaid = Number(payments._sum.lateFeeApplied ?? 0);
   const totalPayableAmount = Number(loan.totalPayableAmount ?? principalAmount);
 
   const progressPercentage = (loan.installmentsPaid / loan.termCount) * 100;
@@ -532,10 +552,10 @@ export async function getLoanAmortization(loanId: string) {
     remainingBalance -= principal;
     return {
       installmentNumber: entry.installmentNumber,
-      dueDate:           entry.dueDate,
-      totalPayment:      Number(entry.expectedAmount),
-      principalPayment:  principal,
-      interestPayment:   Number(entry.interestExpected),
+      dueDate: entry.dueDate,
+      totalPayment: Number(entry.expectedAmount),
+      principalPayment: principal,
+      interestPayment: Number(entry.interestExpected),
       remainingBalance,
     };
   });
@@ -560,29 +580,33 @@ export async function getOverdueLoans() {
 }
 
 export async function processOverdueLoans(userId: string): Promise<{ affected: number }> {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  // Marcar cuotas del schedule como OVERDUE
-  await prisma.paymentSchedule.updateMany({
+  const today = financialDayStart();
+  const candidates = await prisma.loan.findMany({
     where: {
-      status: ScheduleStatus.PENDING,
-      dueDate: { lt: today },
+      status: { in: [LoanStatus.ACTIVE, LoanStatus.OVERDUE] },
+      paymentSchedule: { some: { status: ScheduleStatus.PENDING, dueDate: { lt: today } } }
     },
-    data: { status: ScheduleStatus.OVERDUE },
+    select: { id: true }, orderBy: { id: "asc" },
   });
-
-  // Marcar los loans correspondientes (DRAFT excluido explícitamente)
-  const result = await prisma.loan.updateMany({
-    where: {
-      status: LoanStatus.ACTIVE,
-      nextDueDate: { lt: today },
-    },
-    data: {
-      status: LoanStatus.OVERDUE,
-      updatedById: userId,
-    },
-  });
-
-  return { affected: result.count };
+  let affected = 0;
+  for (const candidate of candidates) {
+    affected += await financialTransaction(async tx => {
+      const loan = await lockLoan(tx, candidate.id);
+      if (loan.status !== LoanStatus.ACTIVE && loan.status !== LoanStatus.OVERDUE) return 0;
+      const changed = await tx.paymentSchedule.updateMany({
+        where: { loanId: loan.id, status: ScheduleStatus.PENDING, dueDate: { lt: today } },
+        data: { status: ScheduleStatus.OVERDUE },
+      });
+      if (!changed.count) return 0;
+      await tx.loan.update({ where: { id: loan.id }, data: { status: LoanStatus.OVERDUE, updatedById: userId } });
+      await tx.auditLog.create({
+        data: {
+          userId, action: "MARK_LOAN_OVERDUE", entity: AuditEntity.LOAN,
+          entityId: loan.id, details: { changedInstallments: changed.count, previousStatus: loan.status }
+        }
+      });
+      return loan.status === LoanStatus.ACTIVE ? 1 : 0;
+    });
+  }
+  return { affected };
 }

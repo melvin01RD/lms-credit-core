@@ -1,787 +1,99 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+﻿import { beforeEach, describe, expect, it } from "vitest";
 import "./setup";
-import { createPayment, reversePayment } from "../../../lib/services/payment.service";
-import {
-  LoanNotFoundError,
-  PaymentNotAllowedError,
-  InvalidPaymentAmountError,
-} from "../../../lib/errors";
-import { LoanStatus, PaymentType, ScheduleStatus } from "@prisma/client";
+import { Prisma, PaymentType } from "@prisma/client";
+import { createPayment, reversePayment } from "@/lib/services/payment.service";
 import { prismaMock } from "./prisma.mock";
-import {
-  createMockFlatRateLoan,
-  createMockPayment,
-  createMockSchedule,
-  createMockClient,
-} from "./test-factories";
-
-// ============================================
-// Helpers
-// ============================================
-
-/**
- * Sets up all mocks needed for createPayment on a FLAT_RATE loan.
- *
- * Flow:
- *  1. prisma.loan.findUnique   → loan (in createPayment)
- *  2. prisma.loan.findUnique   → loan (in calculateFlatRateDistribution)
- *  3. prisma.paymentSchedule.findMany → pendingEntries (in calculateFlatRateDistribution)
- *  4. prisma.$transaction      → payment.create, paymentSchedule.updateMany,
- *                                paymentSchedule.findFirst, loan.update
- */
-function setupFlatRatePaymentMocks(params: {
-  loan: ReturnType<typeof createMockFlatRateLoan>;
-  pendingEntries: ReturnType<typeof createMockSchedule>;
-  payment: ReturnType<typeof createMockPayment>;
-  updatedLoan: ReturnType<typeof createMockFlatRateLoan>;
-  nextPendingEntry?: ReturnType<typeof createMockSchedule>[number] | null;
-}) {
-  const { loan, pendingEntries, payment, updatedLoan, nextPendingEntry = null } = params;
-
-  // Called twice: once in createPayment, once inside calculateFlatRateDistribution
-  prismaMock.loan.findUnique.mockResolvedValue(loan);
-  prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
-
-  prismaMock.$transaction.mockImplementation(async (callback: any) => {
-    const txMock = {
-      payment: {
-        create: vi.fn().mockResolvedValue(payment),
-      },
-      paymentSchedule: {
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        findFirst: vi.fn().mockResolvedValue(nextPendingEntry),
-      },
-      loan: {
-        update: vi.fn().mockResolvedValue({ ...updatedLoan, client: createMockClient() }),
-      },
-    };
-    return callback(txMock);
+import { financialFixture } from "./financial-fixture";
+const data = (totalAmount = 300) => ({ loanId: "loan-1", totalAmount, createdById: "user-1", type: PaymentType.REGULAR });
+describe("Flat Rate transactional payments", () => {
+  beforeEach(() => { financialFixture(); });
+  it("links exactly one paid installment to its payment", async () => {
+    const s = financialFixture(); const r = await createPayment(data());
+    expect(s.entries.filter(e => e.status === "PAID")).toHaveLength(1);
+    expect(s.entries[0].paymentId).toBe(r.payment.id);
+    expect(r.installmentsCovered).toBe(1); expect(r.installmentsPaid).toBe(1); expect(r.newBalance).toBe(600);
   });
-}
-
-// ============================================
-// createPayment - FLAT_RATE - pago regular (1 cuota)
-// ============================================
-
-describe("createPayment - FLAT_RATE - pago regular", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  it("uses actual principal/interest amounts from the schedule", async () => {
+    const r = await createPayment(data());
+    expect(Number(r.payment.capitalApplied)).toBe(222); expect(Number(r.payment.interestApplied)).toBe(78);
   });
-
-  it("pago exacto de una cuota marca 1 schedule entry como PAID", async () => {
-    const loan = createMockFlatRateLoan();
-    const pendingEntries = createMockSchedule("loan-flat-1", 45, 300, new Date());
-    const payment = { ...createMockPayment({ totalAmount: 300, installmentsCovered: 1 }), loanId: "loan-flat-1" };
-    const updatedLoan = createMockFlatRateLoan({ installmentsPaid: 1, remainingCapital: 13200 });
-
-    let capturedUpdateMany: any;
-    prismaMock.loan.findUnique.mockResolvedValue(loan);
-    prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: { create: vi.fn().mockResolvedValue(payment) },
-        paymentSchedule: {
-          updateMany: vi.fn().mockImplementation((args: any) => {
-            capturedUpdateMany = args;
-            return Promise.resolve({ count: 1 });
-          }),
-          findFirst: vi.fn().mockResolvedValue(pendingEntries[1]),
-        },
-        loan: {
-          update: vi.fn().mockResolvedValue({ ...updatedLoan, client: createMockClient() }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    await createPayment({
-      loanId: "loan-flat-1",
-      totalAmount: 300,
-      type: PaymentType.REGULAR,
-      createdById: "user-1",
-    });
-
-    // Should mark exactly 1 schedule entry
-    expect(capturedUpdateMany.where.id.in).toHaveLength(1);
-    expect(capturedUpdateMany.data.status).toBe(ScheduleStatus.PAID);
+  it("records actor, supplied date and next pending due date", async () => {
+    const s = financialFixture(); const date = new Date("2026-01-01");
+    const r = await createPayment({ ...data(), paymentDate: date });
+    expect(r.payment.createdById).toBe("user-1"); expect(r.payment.paymentDate).toEqual(date);
+    expect(r.loan.nextDueDate).toEqual(s.entries[1].dueDate);
   });
-
-  it("incrementa installmentsPaid en 1", async () => {
-    const loan = createMockFlatRateLoan({ installmentsPaid: 0 });
-    const pendingEntries = createMockSchedule("loan-flat-1", 45, 300, new Date());
-    const payment = { ...createMockPayment({ totalAmount: 300 }), loanId: "loan-flat-1" };
-    const updatedLoan = createMockFlatRateLoan({ installmentsPaid: 1 });
-
-    let capturedLoanUpdate: any;
-    prismaMock.loan.findUnique.mockResolvedValue(loan);
-    prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: { create: vi.fn().mockResolvedValue(payment) },
-        paymentSchedule: {
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-          findFirst: vi.fn().mockResolvedValue(pendingEntries[1]),
-        },
-        loan: {
-          update: vi.fn().mockImplementation((args: any) => {
-            capturedLoanUpdate = args;
-            return Promise.resolve({ ...updatedLoan, client: createMockClient() });
-          }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    await createPayment({
-      loanId: "loan-flat-1",
-      totalAmount: 300,
-      type: PaymentType.REGULAR,
-      createdById: "user-1",
-    });
-
-    expect(capturedLoanUpdate.data.installmentsPaid).toBe(1);
+  it("advances multiple complete installments", async () => {
+    const r = await createPayment(data(600)); expect(r.payment.type).toBe("ADVANCE");
+    expect(r.installmentsPaid).toBe(2); expect(r.newBalance).toBe(300); expect(r.excessAmount).toBe(0);
   });
-
-  it("registra el payment con installmentsCovered: 1", async () => {
-    const loan = createMockFlatRateLoan();
-    const pendingEntries = createMockSchedule("loan-flat-1", 45, 300, new Date());
-    const payment = { ...createMockPayment({ totalAmount: 300, installmentsCovered: 1 }), loanId: "loan-flat-1" };
-    const updatedLoan = createMockFlatRateLoan({ installmentsPaid: 1 });
-
-    let capturedPaymentCreate: any;
-    prismaMock.loan.findUnique.mockResolvedValue(loan);
-    prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: {
-          create: vi.fn().mockImplementation((args: any) => {
-            capturedPaymentCreate = args;
-            return Promise.resolve(payment);
-          }),
-        },
-        paymentSchedule: {
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-          findFirst: vi.fn().mockResolvedValue(pendingEntries[1]),
-        },
-        loan: {
-          update: vi.fn().mockResolvedValue({ ...updatedLoan, client: createMockClient() }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    await createPayment({
-      loanId: "loan-flat-1",
-      totalAmount: 300,
-      type: PaymentType.REGULAR,
-      createdById: "user-1",
-    });
-
-    expect(capturedPaymentCreate.data.installmentsCovered).toBe(1);
+  it("settles a loan with zero balance and no due date", async () => {
+    const r = await createPayment(data(900)); expect(r.payment.type).toBe("FULL_SETTLEMENT");
+    expect(r.loan.status).toBe("PAID"); expect(r.newBalance).toBe(0); expect(r.loan.nextDueDate).toBeNull();
+    expect(r.installmentsPaid).toBe(3); expect(r.installmentsPending).toBe(0);
   });
-
-  it("capitalApplied e interestApplied son proporcionales al número de cuotas cubiertas", async () => {
-    const loan = createMockFlatRateLoan();
-    const pendingEntries = createMockSchedule("loan-flat-1", 45, 300, new Date());
-    const payment = { ...createMockPayment({ totalAmount: 300 }), loanId: "loan-flat-1" };
-    const updatedLoan = createMockFlatRateLoan({ installmentsPaid: 1 });
-
-    let capturedPaymentCreate: any;
-    prismaMock.loan.findUnique.mockResolvedValue(loan);
-    prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: {
-          create: vi.fn().mockImplementation((args: any) => {
-            capturedPaymentCreate = args;
-            return Promise.resolve(payment);
-          }),
-        },
-        paymentSchedule: {
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-          findFirst: vi.fn().mockResolvedValue(pendingEntries[1]),
-        },
-        loan: {
-          update: vi.fn().mockResolvedValue({ ...updatedLoan, client: createMockClient() }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    await createPayment({
-      loanId: "loan-flat-1",
-      totalAmount: 300,
-      type: PaymentType.REGULAR,
-      createdById: "user-1",
-    });
-
-    // capital per installment = 10000 / 45 ≈ 222.22
-    // interest per installment = 3500 / 45 ≈ 77.78
-    const expectedCapital  = Math.round((10000 / 45) * 100) / 100;
-    const expectedInterest = Math.round((3500  / 45) * 100) / 100;
-    expect(capturedPaymentCreate.data.capitalApplied).toBeCloseTo(expectedCapital,  1);
-    expect(capturedPaymentCreate.data.interestApplied).toBeCloseTo(expectedInterest, 1);
+  it("charges all pending mora first, once per installment", async () => {
+    financialFixture(3, true); const r = await createPayment(data(345));
+    expect(Number(r.payment.lateFeeApplied)).toBe(45); expect(r.newBalance).toBe(600);
+    expect(r.loan.status).toBe("OVERDUE"); expect(Number((await createPayment(data(300))).payment.lateFeeApplied)).toBe(0);
   });
-});
-
-// ============================================
-// createPayment - FLAT_RATE - cuotas adelantadas (ADVANCE)
-// ============================================
-
-describe("createPayment - FLAT_RATE - cuotas adelantadas", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  it("settles all overdue installments including mora", async () => {
+    financialFixture(3, true); const r = await createPayment(data(945));
+    expect(Number(r.payment.lateFeeApplied)).toBe(45); expect(r.newBalance).toBe(0);
   });
-
-  it("pago de 2 cuotas marca 2 schedule entries como PAID", async () => {
-    const loan = createMockFlatRateLoan();
-    const pendingEntries = createMockSchedule("loan-flat-1", 45, 300, new Date());
-    const payment = { ...createMockPayment({ totalAmount: 600, installmentsCovered: 2 }), loanId: "loan-flat-1" };
-    const updatedLoan = createMockFlatRateLoan({ installmentsPaid: 2 });
-
-    let capturedUpdateMany: any;
-    prismaMock.loan.findUnique.mockResolvedValue(loan);
-    prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: { create: vi.fn().mockResolvedValue(payment) },
-        paymentSchedule: {
-          updateMany: vi.fn().mockImplementation((args: any) => {
-            capturedUpdateMany = args;
-            return Promise.resolve({ count: 2 });
-          }),
-          findFirst: vi.fn().mockResolvedValue(pendingEntries[2]),
-        },
-        loan: {
-          update: vi.fn().mockResolvedValue({ ...updatedLoan, client: createMockClient() }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    await createPayment({
-      loanId: "loan-flat-1",
-      totalAmount: 600,
-      type: PaymentType.ADVANCE,
-      createdById: "user-1",
-    });
-
-    expect(capturedUpdateMany.where.id.in).toHaveLength(2);
+  it("does not use backdating to bypass current mora", async () => {
+    financialFixture(3, true);
+    await expect(createPayment({ ...data(), paymentDate: new Date("2019-01-01") })).rejects.toMatchObject({ code: "INVALID_PAYMENT_AMOUNT" });
   });
-
-  it("tipo de pago se establece como ADVANCE automáticamente para 2+ cuotas", async () => {
-    const loan = createMockFlatRateLoan();
-    const pendingEntries = createMockSchedule("loan-flat-1", 45, 300, new Date());
-    const payment = { ...createMockPayment({ totalAmount: 600 }), loanId: "loan-flat-1" };
-    const updatedLoan = createMockFlatRateLoan({ installmentsPaid: 2 });
-
-    let capturedPaymentCreate: any;
-    prismaMock.loan.findUnique.mockResolvedValue(loan);
-    prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: {
-          create: vi.fn().mockImplementation((args: any) => {
-            capturedPaymentCreate = args;
-            return Promise.resolve(payment);
-          }),
-        },
-        paymentSchedule: {
-          updateMany: vi.fn().mockResolvedValue({ count: 2 }),
-          findFirst: vi.fn().mockResolvedValue(pendingEntries[2]),
-        },
-        loan: {
-          update: vi.fn().mockResolvedValue({ ...updatedLoan, client: createMockClient() }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    await createPayment({
-      loanId: "loan-flat-1",
-      totalAmount: 600,
-      type: PaymentType.ADVANCE,
-      createdById: "user-1",
-    });
-
-    expect(capturedPaymentCreate.data.type).toBe(PaymentType.ADVANCE);
+  it.each([0, -1, NaN, Infinity, 0.001, 10000000000])("rejects invalid money %s", async amount => {
+    await expect(createPayment(data(amount))).rejects.toMatchObject({ code: "INVALID_PAYMENT_AMOUNT" });
+    expect(prismaMock.payment.create).not.toHaveBeenCalled();
   });
-
-  it("installmentsPaid incrementa en la cantidad de cuotas cubiertas", async () => {
-    const loan = createMockFlatRateLoan({ installmentsPaid: 5 });
-    const pendingEntries = createMockSchedule("loan-flat-1", 40, 300, new Date());
-    const payment = { ...createMockPayment({ totalAmount: 600 }), loanId: "loan-flat-1" };
-    const updatedLoan = createMockFlatRateLoan({ installmentsPaid: 7 });
-
-    let capturedLoanUpdate: any;
-    prismaMock.loan.findUnique.mockResolvedValue(loan);
-    prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: { create: vi.fn().mockResolvedValue(payment) },
-        paymentSchedule: {
-          updateMany: vi.fn().mockResolvedValue({ count: 2 }),
-          findFirst: vi.fn().mockResolvedValue(pendingEntries[2]),
-        },
-        loan: {
-          update: vi.fn().mockImplementation((args: any) => {
-            capturedLoanUpdate = args;
-            return Promise.resolve({ ...updatedLoan, client: createMockClient() });
-          }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    await createPayment({
-      loanId: "loan-flat-1",
-      totalAmount: 600,
-      type: PaymentType.ADVANCE,
-      createdById: "user-1",
-    });
-
-    // was 5, covers 2 → 7
-    expect(capturedLoanUpdate.data.installmentsPaid).toBe(7);
+  it.each(["CANCELED", "PAID", "DRAFT"])("rejects payments on %s loans", async status => {
+    financialFixture().loan.status = status;
+    await expect(createPayment(data())).rejects.toMatchObject({ code: "PAYMENT_NOT_ALLOWED" });
   });
-
-  it("cargo sagrado: pago adelantado NO cambia totalFinanceCharge del préstamo", async () => {
-    const loan = createMockFlatRateLoan({ totalFinanceCharge: 3500 });
-    const pendingEntries = createMockSchedule("loan-flat-1", 45, 300, new Date());
-    const payment = { ...createMockPayment({ totalAmount: 600 }), loanId: "loan-flat-1" };
-    const updatedLoan = createMockFlatRateLoan({ installmentsPaid: 2, totalFinanceCharge: 3500 });
-
-    let capturedLoanUpdate: any;
-    prismaMock.loan.findUnique.mockResolvedValue(loan);
-    prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: { create: vi.fn().mockResolvedValue(payment) },
-        paymentSchedule: {
-          updateMany: vi.fn().mockResolvedValue({ count: 2 }),
-          findFirst: vi.fn().mockResolvedValue(pendingEntries[2]),
-        },
-        loan: {
-          update: vi.fn().mockImplementation((args: any) => {
-            capturedLoanUpdate = args;
-            return Promise.resolve({ ...updatedLoan, client: createMockClient() });
-          }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    await createPayment({
-      loanId: "loan-flat-1",
-      totalAmount: 600,
-      type: PaymentType.ADVANCE,
-      createdById: "user-1",
-    });
-
-    // The loan update does NOT include totalFinanceCharge — it stays unchanged
-    expect(capturedLoanUpdate.data.totalFinanceCharge).toBeUndefined();
-  });
-});
-
-// ============================================
-// createPayment - FLAT_RATE - liquidación total
-// ============================================
-
-describe("createPayment - FLAT_RATE - liquidación total", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("préstamo queda PAID cuando se pagan todas las cuotas", async () => {
-    // Loan with 5 remaining installments
-    const loan = createMockFlatRateLoan({ termCount: 5, installmentsPaid: 0, totalPayableAmount: 1500, remainingCapital: 1500 });
-    const pendingEntries = createMockSchedule("loan-flat-1", 5, 300, new Date());
-    const payment = { ...createMockPayment({ totalAmount: 1500, installmentsCovered: 5 }), loanId: "loan-flat-1" };
-    const updatedLoan = createMockFlatRateLoan({ termCount: 5, installmentsPaid: 5, remainingCapital: 0, status: LoanStatus.PAID, nextDueDate: null });
-
-    let capturedLoanUpdate: any;
-    prismaMock.loan.findUnique.mockResolvedValue(loan);
-    prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: { create: vi.fn().mockResolvedValue(payment) },
-        paymentSchedule: {
-          updateMany: vi.fn().mockResolvedValue({ count: 5 }),
-          findFirst: vi.fn().mockResolvedValue(null), // no more pending
-        },
-        loan: {
-          update: vi.fn().mockImplementation((args: any) => {
-            capturedLoanUpdate = args;
-            return Promise.resolve({ ...updatedLoan, client: createMockClient() });
-          }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    const result = await createPayment({
-      loanId: "loan-flat-1",
-      totalAmount: 1500,
-      type: PaymentType.FULL_SETTLEMENT,
-      createdById: "user-1",
-    });
-
-    expect(capturedLoanUpdate.data.status).toBe(LoanStatus.PAID);
-    expect(capturedLoanUpdate.data.nextDueDate).toBeNull();
-    expect(result.statusChanged).toBe(true);
-  });
-
-  it("installmentsPaid === termCount al liquidar", async () => {
-    const loan = createMockFlatRateLoan({ termCount: 5, installmentsPaid: 0, totalPayableAmount: 1500, remainingCapital: 1500 });
-    const pendingEntries = createMockSchedule("loan-flat-1", 5, 300, new Date());
-    const payment = { ...createMockPayment({ totalAmount: 1500 }), loanId: "loan-flat-1" };
-    const updatedLoan = createMockFlatRateLoan({ termCount: 5, installmentsPaid: 5, status: LoanStatus.PAID });
-
-    let capturedLoanUpdate: any;
-    prismaMock.loan.findUnique.mockResolvedValue(loan);
-    prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: { create: vi.fn().mockResolvedValue(payment) },
-        paymentSchedule: {
-          updateMany: vi.fn().mockResolvedValue({ count: 5 }),
-          findFirst: vi.fn().mockResolvedValue(null),
-        },
-        loan: {
-          update: vi.fn().mockImplementation((args: any) => {
-            capturedLoanUpdate = args;
-            return Promise.resolve({ ...updatedLoan, client: createMockClient() });
-          }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    await createPayment({
-      loanId: "loan-flat-1",
-      totalAmount: 1500,
-      type: PaymentType.FULL_SETTLEMENT,
-      createdById: "user-1",
-    });
-
-    expect(capturedLoanUpdate.data.installmentsPaid).toBe(5);
-  });
-
-  it("remainingCapital queda en 0 al liquidar", async () => {
-    const loan = createMockFlatRateLoan({ termCount: 5, installmentsPaid: 0, totalPayableAmount: 1500, remainingCapital: 1500 });
-    const pendingEntries = createMockSchedule("loan-flat-1", 5, 300, new Date());
-    const payment = { ...createMockPayment({ totalAmount: 1500 }), loanId: "loan-flat-1" };
-    const updatedLoan = createMockFlatRateLoan({ termCount: 5, installmentsPaid: 5, remainingCapital: 0, status: LoanStatus.PAID });
-
-    let capturedLoanUpdate: any;
-    prismaMock.loan.findUnique.mockResolvedValue(loan);
-    prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: { create: vi.fn().mockResolvedValue(payment) },
-        paymentSchedule: {
-          updateMany: vi.fn().mockResolvedValue({ count: 5 }),
-          findFirst: vi.fn().mockResolvedValue(null),
-        },
-        loan: {
-          update: vi.fn().mockImplementation((args: any) => {
-            capturedLoanUpdate = args;
-            return Promise.resolve({ ...updatedLoan, client: createMockClient() });
-          }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    await createPayment({
-      loanId: "loan-flat-1",
-      totalAmount: 1500,
-      type: PaymentType.FULL_SETTLEMENT,
-      createdById: "user-1",
-    });
-
-    expect(capturedLoanUpdate.data.remainingCapital).toBe(0);
-  });
-});
-
-// ============================================
-// createPayment - FLAT_RATE - validaciones y errores
-// ============================================
-
-describe("createPayment - FLAT_RATE - errores", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("lanza LoanNotFoundError si el préstamo no existe", async () => {
+  it("rejects nonexistent loans", async () => {
     prismaMock.loan.findUnique.mockResolvedValue(null);
-
-    await expect(
-      createPayment({
-        loanId: "non-existent",
-        totalAmount: 300,
-        type: PaymentType.REGULAR,
-        createdById: "user-1",
-      })
-    ).rejects.toThrow(LoanNotFoundError);
+    await expect(createPayment(data())).rejects.toMatchObject({ code: "LOAN_NOT_FOUND" });
   });
-
-  it("lanza PaymentNotAllowedError si el préstamo está PAID", async () => {
-    const paidLoan = createMockFlatRateLoan({ status: LoanStatus.PAID });
-    prismaMock.loan.findUnique.mockResolvedValue(paidLoan);
-
-    await expect(
-      createPayment({
-        loanId: "loan-flat-1",
-        totalAmount: 300,
-        type: PaymentType.REGULAR,
-        createdById: "user-1",
-      })
-    ).rejects.toThrow(PaymentNotAllowedError);
+  it.each([1, 301, 350])("rejects incomplete installments or unallocated remainders %s", async amount => {
+    await expect(createPayment(data(amount))).rejects.toMatchObject({ code: "INVALID_PAYMENT_AMOUNT" });
+    expect(prismaMock.payment.create).not.toHaveBeenCalled();
   });
-
-  it("lanza PaymentNotAllowedError si el préstamo está CANCELED", async () => {
-    const canceledLoan = createMockFlatRateLoan({ status: LoanStatus.CANCELED });
-    prismaMock.loan.findUnique.mockResolvedValue(canceledLoan);
-
-    await expect(
-      createPayment({
-        loanId: "loan-flat-1",
-        totalAmount: 300,
-        type: PaymentType.REGULAR,
-        createdById: "user-1",
-      })
-    ).rejects.toThrow(PaymentNotAllowedError);
+  it("rejects overpayments", async () => {
+    await expect(createPayment(data(900.01))).rejects.toMatchObject({ code: "PAYMENT_EXCEEDS_BALANCE" });
+    expect(prismaMock.payment.create).not.toHaveBeenCalled();
   });
-
-  it("lanza error si el pago es insuficiente para cubrir una cuota", async () => {
-    const loan = createMockFlatRateLoan({ installmentAmount: 300 });
-    const pendingEntries = createMockSchedule("loan-flat-1", 45, 300, new Date());
-
-    prismaMock.loan.findUnique.mockResolvedValue(loan);
-    prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
-
-    // The error is thrown by calculateFlatRatePaymentDistribution (pure function)
-    // before the service wrapper can convert it to InvalidPaymentAmountError
-    await expect(
-      createPayment({
-        loanId: "loan-flat-1",
-        totalAmount: 100, // less than 300
-        type: PaymentType.REGULAR,
-        createdById: "user-1",
-      })
-    ).rejects.toThrow("es insuficiente para cubrir una cuota");
+  it("uses the exact final installment rounding adjustment", async () => {
+    const s = financialFixture(); s.entries[2].expectedAmount = 299.99; s.entries[2].interestExpected = 77.99;
+    s.loan.totalFinanceCharge = 233.99; s.loan.totalPayableAmount = 899.99; s.loan.remainingCapital = 899.99;
+    await createPayment(data(600)); const r = await createPayment(data(299.99));
+    expect(r.newBalance).toBe(0); expect(Number(r.payment.interestApplied)).toBe(77.99);
   });
-});
-
-// ============================================
-// reversePayment - FLAT_RATE
-// ============================================
-
-describe("reversePayment - FLAT_RATE", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  it("rejects an inconsistent schedule breakdown", async () => {
+    financialFixture().entries[0].interestExpected = 99;
+    await expect(createPayment(data())).rejects.toMatchObject({ code: "INVALID_PAYMENT_SCHEDULE" });
   });
-
-  function setupFlatRateReversal(params: {
-    originalLoan: ReturnType<typeof createMockFlatRateLoan>;
-    originalPaymentOverrides?: object;
-    updatedLoan: ReturnType<typeof createMockFlatRateLoan>;
-    nextPending?: object | null;
-  }) {
-    const { originalLoan, originalPaymentOverrides = {}, updatedLoan, nextPending = null } = params;
-
-    const originalPayment = {
-      ...createMockPayment({
-        totalAmount: 300,
-        capitalApplied: 222.22,
-        interestApplied: 77.78,
-        installmentsCovered: 1,
-        ...originalPaymentOverrides,
-      }),
-      loanId: "loan-flat-1",
-      loan: originalLoan,
-    };
-
-    const reversalPayment = {
-      ...createMockPayment({
-        id: "reversal-1",
-        totalAmount: -300,
-        capitalApplied: -222.22,
-        interestApplied: -77.78,
-        installmentsCovered: -1,
-      }),
-      loanId: "loan-flat-1",
-    };
-
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: {
-          findUnique: vi.fn().mockResolvedValue(originalPayment),
-          create: vi.fn().mockResolvedValue(reversalPayment),
-        },
-        paymentSchedule: {
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-          findFirst: vi.fn().mockResolvedValue(nextPending),
-        },
-        loan: {
-          update: vi.fn().mockResolvedValue({ ...updatedLoan, client: createMockClient() }),
-        },
-      };
-      return callback(txMock);
-    });
-  }
-
-  it("revierte las cuotas del schedule a status PENDING", async () => {
-    const originalLoan = createMockFlatRateLoan({ installmentsPaid: 1 });
-    const updatedLoan = createMockFlatRateLoan({ installmentsPaid: 0 });
-
-    let capturedScheduleUpdate: any;
-    const originalPayment = {
-      ...createMockPayment({ totalAmount: 300, capitalApplied: 222.22, interestApplied: 77.78, installmentsCovered: 1 }),
-      loanId: "loan-flat-1",
-      loan: originalLoan,
-    };
-    const reversalPayment = createMockPayment({ id: "reversal-1", totalAmount: -300 });
-
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: {
-          findUnique: vi.fn().mockResolvedValue(originalPayment),
-          create: vi.fn().mockResolvedValue(reversalPayment),
-        },
-        paymentSchedule: {
-          updateMany: vi.fn().mockImplementation((args: any) => {
-            capturedScheduleUpdate = args;
-            return Promise.resolve({ count: 1 });
-          }),
-          findFirst: vi.fn().mockResolvedValue(null),
-        },
-        loan: {
-          update: vi.fn().mockResolvedValue({ ...updatedLoan, client: createMockClient() }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    await reversePayment("payment-1", "user-1", "Error en el pago");
-
-    expect(capturedScheduleUpdate.data.status).toBe(ScheduleStatus.PENDING);
-    expect(capturedScheduleUpdate.data.paidAt).toBeNull();
+  it("requires all selected schedule rows to be updated", async () => {
+    prismaMock.paymentSchedule.updateMany.mockResolvedValue({ count: 0 });
+    await expect(createPayment(data())).rejects.toMatchObject({ code: "PAYMENT_CONFLICT" });
   });
-
-  it("decrece installmentsPaid en la cantidad revertida", async () => {
-    const originalLoan = createMockFlatRateLoan({ installmentsPaid: 5 });
-    const updatedLoan = createMockFlatRateLoan({ installmentsPaid: 3 });
-
-    const originalPayment = {
-      ...createMockPayment({ totalAmount: 600, capitalApplied: 444.44, interestApplied: 155.56, installmentsCovered: 2 }),
-      loanId: "loan-flat-1",
-      loan: originalLoan,
-    };
-    const reversalPayment = createMockPayment({ id: "reversal-1", totalAmount: -600 });
-
-    let capturedLoanUpdate: any;
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: {
-          findUnique: vi.fn().mockResolvedValue(originalPayment),
-          create: vi.fn().mockResolvedValue(reversalPayment),
-        },
-        paymentSchedule: {
-          updateMany: vi.fn().mockResolvedValue({ count: 2 }),
-          findFirst: vi.fn().mockResolvedValue(null),
-        },
-        loan: {
-          update: vi.fn().mockImplementation((args: any) => {
-            capturedLoanUpdate = args;
-            return Promise.resolve({ ...updatedLoan, client: createMockClient() });
-          }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    await reversePayment("payment-1", "user-1", "Reversal");
-
-    // 5 - 2 = 3
-    expect(capturedLoanUpdate.data.installmentsPaid).toBe(3);
+  it("propagates audit failures to the transaction", async () => {
+    prismaMock.auditLog.create.mockRejectedValue(new Error("audit unavailable"));
+    await expect(createPayment(data())).rejects.toThrow("audit unavailable");
   });
-
-  it("si el préstamo estaba PAID, vuelve a ACTIVE después del reversal", async () => {
-    const originalLoan = createMockFlatRateLoan({ status: LoanStatus.PAID, installmentsPaid: 45, remainingCapital: 0 });
-    const updatedLoan = createMockFlatRateLoan({ status: LoanStatus.ACTIVE, installmentsPaid: 44 });
-    const nextPendingEntry = { id: "schedule-45", installmentNumber: 45, dueDate: new Date(Date.now() + 86400000) };
-
-    const originalPayment = {
-      ...createMockPayment({ totalAmount: 300, capitalApplied: 222.22, interestApplied: 77.78, installmentsCovered: 1 }),
-      loanId: "loan-flat-1",
-      loan: originalLoan,
-    };
-    const reversalPayment = createMockPayment({ id: "reversal-1", totalAmount: -300 });
-
-    let capturedLoanUpdate: any;
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: {
-          findUnique: vi.fn().mockResolvedValue(originalPayment),
-          create: vi.fn().mockResolvedValue(reversalPayment),
-        },
-        paymentSchedule: {
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-          findFirst: vi.fn().mockResolvedValue(nextPendingEntry),
-        },
-        loan: {
-          update: vi.fn().mockImplementation((args: any) => {
-            capturedLoanUpdate = args;
-            return Promise.resolve({ ...updatedLoan, client: createMockClient() });
-          }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    const result = await reversePayment("payment-1", "user-1", "Reversal");
-
-    expect(capturedLoanUpdate.data.status).toBe(LoanStatus.ACTIVE);
-    expect(result.statusChanged).toBe(true);
+  it("writes audit through the transaction", async () => {
+    const r = await createPayment(data());
+    expect(prismaMock.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ entityId: r.payment.id, action: "REGISTER_PAYMENT", userId: "user-1" }) }));
   });
-
-  it("nextDueDate se recalcula a la primera cuota pendiente después del reversal", async () => {
-    const nextDue = new Date(Date.now() + 86400000);
-    const originalLoan = createMockFlatRateLoan({ installmentsPaid: 3 });
-    const updatedLoan = createMockFlatRateLoan({ installmentsPaid: 2 });
-    const nextPendingEntry = { id: "schedule-3", installmentNumber: 3, dueDate: nextDue };
-
-    const originalPayment = {
-      ...createMockPayment({ totalAmount: 300, installmentsCovered: 1 }),
-      loanId: "loan-flat-1",
-      loan: originalLoan,
-    };
-    const reversalPayment = createMockPayment({ id: "reversal-1", totalAmount: -300 });
-
-    let capturedLoanUpdate: any;
-    prismaMock.$transaction.mockImplementation(async (callback: any) => {
-      const txMock = {
-        payment: {
-          findUnique: vi.fn().mockResolvedValue(originalPayment),
-          create: vi.fn().mockResolvedValue(reversalPayment),
-        },
-        paymentSchedule: {
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-          findFirst: vi.fn().mockResolvedValue(nextPendingEntry),
-        },
-        loan: {
-          update: vi.fn().mockImplementation((args: any) => {
-            capturedLoanUpdate = args;
-            return Promise.resolve({ ...updatedLoan, client: createMockClient() });
-          }),
-        },
-      };
-      return callback(txMock);
-    });
-
-    await reversePayment("payment-1", "user-1", "Reversal");
-
-    expect(capturedLoanUpdate.data.nextDueDate).toEqual(nextDue);
+  it("refunds mora on reversal without adding it to the loan balance", async () => {
+    financialFixture(3, true); const p = await createPayment(data(345));
+    const r = await reversePayment(p.payment.id, "user-1", "Error");
+    expect(r.newBalance).toBe(900); expect(Number(r.payment.totalAmount)).toBe(-345);
+    expect(Number(r.payment.lateFeeApplied)).toBe(-45); expect(r.payment.reversesPaymentId).toBe(p.payment.id);
+  });
+  it("preserves Decimal values in service results", async () => {
+    expect((await createPayment(data())).payment.totalAmount).toBeInstanceOf(Prisma.Decimal);
   });
 });

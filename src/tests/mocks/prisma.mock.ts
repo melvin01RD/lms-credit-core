@@ -15,6 +15,7 @@ export const prismaMock = {
 
   // Payment operations
   payment: {
+    findFirst: vi.fn(),
     create: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),
@@ -65,6 +66,7 @@ export const prismaMock = {
 
   // AuditLog operations
   auditLog: {
+    findUnique: vi.fn(),
     create: vi.fn().mockResolvedValue({
       id: "audit-1",
       userId: "user-1",
@@ -78,6 +80,8 @@ export const prismaMock = {
 
   // Transaction support
   $transaction: vi.fn(),
+  $queryRaw: vi.fn(),
+  paymentLateFeeAllocation: { findMany: vi.fn(), createMany: vi.fn() },
 };
 
 // Type for better intellisense

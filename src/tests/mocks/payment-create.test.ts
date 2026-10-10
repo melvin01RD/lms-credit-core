@@ -9,10 +9,11 @@ import {
 import { LoanStatus, PaymentType } from "@prisma/client";
 import { prismaMock } from "./prisma.mock";
 import { createMockFlatRateLoan, createMockSchedule } from "./test-factories";
+import { financialFixture } from "./financial-fixture";
 
 describe("createPayment - Validation Errors", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    financialFixture();
   });
 
   it("should throw LoanNotFoundError when loan does not exist", async () => {

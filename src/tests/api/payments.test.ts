@@ -21,6 +21,8 @@ function makeRequest(
 }
 
 const mockPayment = {
+  reversesPaymentId: null,
+  reversalReason: null,
   createdBy: { id: "user-1", firstName: "Admin", lastName: "User" },
   id: "payment-1",
   loanId: "loan-1",
