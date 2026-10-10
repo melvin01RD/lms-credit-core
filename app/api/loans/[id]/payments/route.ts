@@ -13,7 +13,10 @@ export const GET = withAuth(async (req, context) => {
 
 export const POST = withAuth(async (req, context) => {
   const params = await context!.params;
-  const result = await createPayment(await readPaymentInput(req, req.session.userId, params.id));
+  const input = await readPaymentInput(req, req.session.userId, params.id);
+  const retryKey = req.headers.get("Idempotency-Key");
+  if (retryKey !== null) input.idempotencyKey = retryKey;
+  const result = await createPayment(input);
   
   return NextResponse.json(result, { status: 201 });
 });

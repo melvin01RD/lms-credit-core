@@ -14,6 +14,7 @@ import {
 } from "../domain/flatRateCalculator";
 import { PaginationOptions, PaginatedResult } from "../types";
 import { auditLog, AuditAction, AuditEntity } from "./audit.service";
+import { withPaymentIdempotency } from "./payment-idempotency";
 
 // ============================================
 // INTERFACES
@@ -25,6 +26,7 @@ export interface CreatePaymentInput {
   type: PaymentType;
   createdById: string;
   paymentDate?: Date;
+  idempotencyKey?: string;
 }
 
 export interface PaymentDistribution {
@@ -73,12 +75,13 @@ export interface PaymentResult {
 export async function calculateFlatRateDistribution(
   loanId: string,
   paymentAmount: number,
-  paymentDate: Date = new Date()
+  paymentDate: Date = new Date(),
+  db: Prisma.TransactionClient = prisma
 ): Promise<PaymentDistribution & { scheduleEntriesToMark: string[] }> {
-  const loan = await prisma.loan.findUnique({ where: { id: loanId } });
+  const loan = await db.loan.findUnique({ where: { id: loanId } });
   if (!loan) throw new LoanNotFoundError(loanId);
 
-  const pendingEntries = await prisma.paymentSchedule.findMany({
+  const pendingEntries = await db.paymentSchedule.findMany({
     where: {
       loanId,
       status: { in: [ScheduleStatus.PENDING, ScheduleStatus.OVERDUE] },
@@ -137,11 +140,18 @@ export async function calculateFlatRateDistribution(
  * Registra un pago usando lógica Flat Rate.
  */
 export async function createPayment(data: CreatePaymentInput): Promise<PaymentResult> {
-  if (!data.totalAmount || data.totalAmount <= 0) {
+  if (data.idempotencyKey) {
+    return withPaymentIdempotency(data, data.idempotencyKey, (tx) => createPaymentCore(data, tx));
+  }
+  return createPaymentCore(data);
+}
+
+async function createPaymentCore(data: CreatePaymentInput, db: Prisma.TransactionClient = prisma): Promise<PaymentResult> {
+  if (!Number.isFinite(data.totalAmount) || data.totalAmount <= 0) {
     throw new InvalidPaymentAmountError("El monto del pago debe ser mayor a cero");
   }
 
-  const loan = await prisma.loan.findUnique({ where: { id: data.loanId } });
+  const loan = await db.loan.findUnique({ where: { id: data.loanId } });
   if (!loan) throw new LoanNotFoundError(data.loanId);
 
   if (loan.status === LoanStatus.PAID) throw new PaymentNotAllowedError(data.loanId, loan.status);
@@ -150,7 +160,7 @@ export async function createPayment(data: CreatePaymentInput): Promise<PaymentRe
   const dist = await calculateFlatRateDistribution(
     data.loanId,
     data.totalAmount,
-    data.paymentDate ?? new Date()
+    data.paymentDate ?? new Date(), db
   );
 
   if (dist.installmentsCovered === 0 && !dist.isFullSettlement) {
@@ -159,7 +169,7 @@ export async function createPayment(data: CreatePaymentInput): Promise<PaymentRe
     );
   }
 
-  const result = await prisma.$transaction(async (tx) => {
+  const operation = async (tx: Prisma.TransactionClient) => {
     const paymentType = dist.isFullSettlement
       ? PaymentType.FULL_SETTLEMENT
       : dist.installmentsCovered > 1
@@ -230,9 +240,10 @@ export async function createPayment(data: CreatePaymentInput): Promise<PaymentRe
       installmentsPending: loan.termCount - newInstallmentsPaid,
       excessAmount: dist.excessAmount,
     };
-  });
+  };
+  const result = db === prisma ? await prisma.$transaction(operation) : await operation(db);
 
-  await auditLog(data.createdById, AuditAction.REGISTER_PAYMENT, AuditEntity.PAYMENT, result.payment.id, {
+  const auditDetails = {
     loanStructure: "FLAT_RATE",
     totalAmount: data.totalAmount,
     loanId: data.loanId,
@@ -241,7 +252,12 @@ export async function createPayment(data: CreatePaymentInput): Promise<PaymentRe
     excessAmount: dist.excessAmount,
     installmentsPaid: result.installmentsPaid,
     installmentsPending: result.installmentsPending,
-  });
+  };
+  if (db === prisma) {
+    await auditLog(data.createdById, AuditAction.REGISTER_PAYMENT, AuditEntity.PAYMENT, result.payment.id, auditDetails);
+  } else {
+    await db.auditLog.create({ data: { userId: data.createdById, action: AuditAction.REGISTER_PAYMENT, entity: AuditEntity.PAYMENT, entityId: result.payment.id, details: auditDetails } });
+  }
 
   return result;
 }
