@@ -801,7 +801,7 @@ function InfoTab({ loan }: { loan: LoanDetail }) {
           </div>
           <div className="info-row">
             <span className="info-label">Teléfono</span>
-            <span className="info-value">{loan.client.phone}</span>
+            <a className="info-value" href={`tel:${loan.client.phone.replace(/[^+0-9]/g, "")}`}>{loan.client.phone}</a>
           </div>
           {loan.client.email && (
             <div className="info-row">
@@ -1014,7 +1014,13 @@ function AmortizationTab({
 
   return (
     <div className="table-container">
-      <table className="table">
+      <div className="mobile-installments" aria-label="Cuotas y amortización">
+        {entries.map((entry) => <details key={entry.installmentNumber}>
+          <summary>Cuota {entry.installmentNumber} · {new Date(entry.dueDate).toLocaleDateString("es-DO")} · RD$ {fmt(entry.totalPayment)}</summary>
+          <dl><dt>Capital</dt><dd>RD$ {fmt(entry.principalPayment)}</dd><dt>Interés</dt><dd>RD$ {fmt(entry.interestPayment)}</dd><dt>Saldo</dt><dd>RD$ {fmt(entry.remainingBalance)}</dd></dl>
+        </details>)}
+      </div>
+      <table className="table desktop-amortization">
         <thead>
           <tr>
             <th>#</th>

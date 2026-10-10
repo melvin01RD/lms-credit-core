@@ -7,7 +7,7 @@ import {
   PaymentNotAllowedError,
   InvalidPaymentAmountError,
 } from "@/lib/errors";
-import { LoanStatus, PaymentType } from "@prisma/client";
+import { LoanStatus, PaymentType, Prisma } from "@prisma/client";
 
 function makeRequest(
   url: string,
@@ -21,13 +21,14 @@ function makeRequest(
 }
 
 const mockPayment = {
+  createdBy: { id: "user-1", firstName: "Admin", lastName: "User" },
   id: "payment-1",
   loanId: "loan-1",
   paymentDate: new Date(),
-  totalAmount: 1500,
-  capitalApplied: 1111.11,
-  interestApplied: 388.89,
-  lateFeeApplied: 0,
+  totalAmount: new Prisma.Decimal(1500),
+  capitalApplied: new Prisma.Decimal(1111.11),
+  interestApplied: new Prisma.Decimal(388.89),
+  lateFeeApplied: new Prisma.Decimal(0),
   installmentsCovered: 1,
   type: PaymentType.REGULAR,
   createdById: "user-1",

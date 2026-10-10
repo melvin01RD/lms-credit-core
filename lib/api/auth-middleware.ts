@@ -79,6 +79,7 @@ export function withAuth(
       (req as AuthenticatedRequest).session = session;
 
       const response = await handler(req as AuthenticatedRequest, context);
+      response.headers.set("Cache-Control", "private, no-store, max-age=0");
 
       // Sliding expiration: issue a fresh JWT with updated lastActivity.
       const refreshedToken = refreshSession(session);

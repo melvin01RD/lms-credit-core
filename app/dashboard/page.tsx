@@ -73,8 +73,11 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchMetrics();
     // Actualizar cada 30 segundos
-    const interval = setInterval(fetchMetrics, 30000);
-    return () => clearInterval(interval);
+    const refresh = () => { if (document.visibilityState === "visible" && navigator.onLine) fetchMetrics(); };
+    const interval = setInterval(refresh, 30000);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("online", refresh);
+    return () => { clearInterval(interval); document.removeEventListener("visibilitychange", refresh); window.removeEventListener("online", refresh); };
   }, []);
 
   async function fetchMetrics() {

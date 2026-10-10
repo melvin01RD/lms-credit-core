@@ -188,7 +188,7 @@ export default function LoansPage() {
       </div>
 
       {/* Table */}
-      <div className="table-container">
+      <div className="table-container mobile-record-table">
         <table className="table">
           <thead>
             <tr>
@@ -220,7 +220,7 @@ export default function LoansPage() {
                     className="table-row"
                     onClick={() => router.push(`/dashboard/prestamos/${loan.id}`)}
                   >
-                    <td>
+                    <td data-label="Cliente">
                       <div className="client-name">
                         <div className="client-avatar">
                           {loan.client.firstName[0]}{loan.client.lastName?.[0] ?? ""}
@@ -231,22 +231,22 @@ export default function LoansPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="td-bold">RD$ {fmt(Number(loan.principalAmount))}</td>
-                    <td>
+                    <td data-label="Monto" className="td-bold">RD$ {fmt(Number(loan.principalAmount))}</td>
+                    <td data-label="Tipo / Tasa">
                       <span className="badge-flat">Cargo Fijo</span>
                     </td>
-                    <td>{FREQUENCY_LABELS[loan.paymentFrequency] ?? loan.paymentFrequency}</td>
-                    <td>RD$ {fmt(Number(loan.installmentAmount))}</td>
-                    <td>RD$ {fmt(Number(loan.remainingCapital))}</td>
-                    <td>
+                    <td data-label="Frecuencia">{FREQUENCY_LABELS[loan.paymentFrequency] ?? loan.paymentFrequency}</td>
+                    <td data-label="Cuota">RD$ {fmt(Number(loan.installmentAmount))}</td>
+                    <td data-label="Pendiente">RD$ {fmt(Number(loan.remainingCapital))}</td>
+                    <td data-label="Estado">
                       <span className="status-badge" style={{ background: sc.bg, color: sc.color }}>
                         {STATUS_LABELS[loan.status] ?? loan.status}
                       </span>
                     </td>
-                    <td className="td-secondary">
+                    <td data-label="Fecha" className="td-secondary">
                       {new Date(loan.createdAt).toLocaleDateString("es-DO")}
                     </td>
-                    <td>
+                    <td data-label="">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="9 18 15 12 9 6" />
                       </svg>
@@ -869,14 +869,14 @@ function CreateLoanModal({
             </div>
           )}
 
-          {/* Loan fields */}
+          <h3 className="form-label">Montos y cargo financiero</h3>
           <div className="form-row">
             <div className="form-group">
               <label className="form-label" htmlFor="principalAmount">Monto del préstamo *</label>
               <input
                 id="principalAmount"
                 className="form-input"
-                type="number"
+                type="number" inputMode="decimal"
                 step="0.01"
                 min="0"
                 value={form.principalAmount}
@@ -892,7 +892,7 @@ function CreateLoanModal({
               <input
                 id="totalFinanceCharge"
                 className="form-input"
-                type="number"
+                type="number" inputMode="decimal"
                 step="0.01"
                 min="0"
                 value={form.totalFinanceCharge}
@@ -925,7 +925,7 @@ function CreateLoanModal({
               <input
                 id="termCount"
                 className="form-input"
-                type="number"
+                type="number" inputMode="decimal"
                 min="1"
                 step="1"
                 value={form.termCount}

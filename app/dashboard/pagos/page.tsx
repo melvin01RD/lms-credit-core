@@ -90,6 +90,11 @@ export default function PaymentsPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [preselectedLoanId, setPreselectedLoanId] = useState<string | undefined>();
+  useEffect(() => {
+    const loanId = new URLSearchParams(window.location.search).get("loanId");
+    if (loanId) { setPreselectedLoanId(loanId); setShowModal(true); }
+  }, []);
   const [toast, setToast] = useState<string | null>(null);
 
   function showToast(message: string) {
@@ -201,7 +206,7 @@ export default function PaymentsPage() {
       </div>
 
       {/* Table */}
-      <div className="table-container">
+      <div className="table-container mobile-record-table">
         <table className="table">
           <thead>
             <tr>
@@ -241,7 +246,7 @@ export default function PaymentsPage() {
                     className="table-row"
                     onClick={() => router.push(`/dashboard/pagos/${payment.id}`)}
                   >
-                    <td>
+                    <td data-label="Cliente">
                       <div className="client-name">
                         <div className="client-avatar">
                           {payment.loan.client.firstName[0]}{payment.loan.client.lastName?.[0] ?? ""}
@@ -252,30 +257,30 @@ export default function PaymentsPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="td-bold">
+                    <td data-label="Monto" className="td-bold">
                       RD$ {fmt(Math.abs(Number(payment.totalAmount)))}
                     </td>
-                    <td>RD$ {fmt(Math.abs(Number(payment.capitalApplied)))}</td>
-                    <td>RD$ {fmt(Math.abs(Number(payment.interestApplied)))}</td>
-                    <td>
+                    <td data-label="Capital">RD$ {fmt(Math.abs(Number(payment.capitalApplied)))}</td>
+                    <td data-label="Interés">RD$ {fmt(Math.abs(Number(payment.interestApplied)))}</td>
+                    <td data-label="Mora">
                       {Number(payment.lateFeeApplied) !== 0
                         ? `RD$ ${fmt(Math.abs(Number(payment.lateFeeApplied)))}`
                         : "—"}
                     </td>
-                    <td>
+                    <td data-label="Tipo">
                       <span className="type-badge" style={{ background: tc.bg, color: tc.color }}>
                         {isNegative ? "Reversión" : (TYPE_LABELS[payment.type] ?? payment.type)}
                       </span>
                     </td>
-                    <td className="td-secondary">
+                    <td data-label="Fecha" className="td-secondary">
                       {new Date(payment.paymentDate).toLocaleDateString("es-DO")}
                     </td>
-                    <td className="td-secondary">
+                    <td data-label="Registrado por" className="td-secondary">
                       {payment.createdBy
                         ? `${payment.createdBy.firstName} ${payment.createdBy.lastName}`
                         : "—"}
                     </td>
-                    <td>
+                    <td data-label="">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <span onClick={(e) => e.stopPropagation()}>
                           <ReportButton
@@ -323,6 +328,7 @@ export default function PaymentsPage() {
 
       {showModal && (
         <CreatePaymentModal
+          preselectedLoanId={preselectedLoanId}
           onClose={() => setShowModal(false)}
           onCreated={() => {
             setShowModal(false);

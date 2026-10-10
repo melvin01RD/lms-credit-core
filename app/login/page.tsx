@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
@@ -9,6 +9,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
   const [showPassword, setShowPassword] = useState(false);
   const [inactivityNotice, setInactivityNotice] = useState(false);
 
@@ -19,6 +20,7 @@ export default function LoginPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting.current) return;
     setError("");
 
     // BUG-S1-05: leer del DOM para capturar autofill que bypasea onChange de React
@@ -32,6 +34,7 @@ export default function LoginPage() {
       return;
     }
 
+    submitting.current = true;
     setLoading(true);
 
     try {
@@ -49,13 +52,16 @@ export default function LoginPage() {
           data.error?.details?.[0]?.message ||
           "Error al iniciar sesión";
         setError(msg);
+        submitting.current = false;
+        setLoading(false);
         return;
       }
 
-      router.push("/dashboard");
+      // Keep the confirmed login busy until this page actually unmounts.
+      router.replace("/dashboard");
     } catch {
       setError("Error de conexión. Intente nuevamente.");
-    } finally {
+      submitting.current = false;
       setLoading(false);
     }
   }
@@ -159,12 +165,16 @@ export default function LoginPage() {
               </svg>
               <input
                 id="email"
-                type="text"
+                name="email"
+                inputMode="email"
+                autoCapitalize="none"
+                spellCheck={false}
+                type="email"
                 className="form-input"
                 placeholder="usuario@ejemplo.com"
                 value={email}
                 onChange={(e) => { setEmail(e.target.value); setInactivityNotice(false); }}
-                autoComplete="off"
+                autoComplete="username"
                 autoFocus
               />
             </div>
@@ -181,12 +191,13 @@ export default function LoginPage() {
               </svg>
               <input
                 id="password"
+                name="password"
                 type={showPassword ? "text" : "password"}
                 className="form-input"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); setInactivityNotice(false); }}
-                autoComplete="off"
+                autoComplete="current-password"
               />
               <button
                 type="button"
@@ -214,6 +225,8 @@ export default function LoginPage() {
             type="submit"
             className="form-submit"
             disabled={loading}
+            aria-label={loading ? "Iniciando sesión" : "Entrar"}
+            aria-busy={loading}
           >
             {loading ? (
               <span className="loading-spinner" />

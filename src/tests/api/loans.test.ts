@@ -10,7 +10,7 @@ import {
   markLoanAsOverdue,
 } from "@/lib/services";
 import { LoanNotFoundError, PaymentNotAllowedError } from "@/lib/errors";
-import { LoanStatus, PaymentFrequency, LoanStructure } from "@prisma/client";
+import { LoanStatus, PaymentFrequency, LoanStructure, Prisma } from "@prisma/client";
 
 function makeRequest(
   url: string,
@@ -24,17 +24,20 @@ function makeRequest(
 }
 
 const mockLoan = {
+  approvalToken: null, approvalTokenExp: null, approvedAt: null, approvedByName: null,
+  createdBy: { id: "user-1", firstName: "Admin", lastName: "User", email: "admin@test.com" },
+  updatedBy: null,
   id: "loan-1",
   clientId: "client-1",
   loanStructure: LoanStructure.FLAT_RATE,
-  principalAmount: 10000,
+  principalAmount: new Prisma.Decimal(10000),
   annualInterestRate: null,
-  totalFinanceCharge: 2000,
-  totalPayableAmount: 12000,
+  totalFinanceCharge: new Prisma.Decimal(2000),
+  totalPayableAmount: new Prisma.Decimal(12000),
   paymentFrequency: PaymentFrequency.WEEKLY,
   termCount: 8,
-  installmentAmount: 1500,
-  remainingCapital: 12000,
+  installmentAmount: new Prisma.Decimal(1500),
+  remainingCapital: new Prisma.Decimal(12000),
   installmentsPaid: 0,
   nextDueDate: new Date(),
   status: LoanStatus.ACTIVE,
@@ -43,7 +46,7 @@ const mockLoan = {
   updatedById: null,
   createdAt: new Date(),
   updatedAt: new Date(),
-  client: { id: "client-1", firstName: "Juan", lastName: "Pérez", documentId: "00112345678" },
+  client: { id: "client-1", firstName: "Juan", lastName: "Pérez", documentId: "00112345678", email: null, phone: "8090000000", address: null, active: true, currency: "DOP", collectionDays: [], createdAt: new Date(), updatedAt: new Date() },
 };
 
 const mockPaginatedLoans = {

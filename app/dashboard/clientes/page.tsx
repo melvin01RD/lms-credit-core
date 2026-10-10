@@ -113,7 +113,7 @@ export default function ClientsPage() {
       </div>
 
       {/* Table */}
-      <div className="table-container">
+      <div className="table-container mobile-record-table">
         <table className="table">
           <thead>
             <tr>
@@ -136,7 +136,7 @@ export default function ClientsPage() {
             ) : (
               clients.data.map((client) => (
                 <tr key={client.id} className="table-row" onClick={() => router.push(`/dashboard/clientes/${client.id}`)}>
-                  <td>
+                  <td data-label="Nombre">
                     <div className="client-name">
                       <div className="client-avatar">
                         {client.firstName[0]}{client.lastName?.[0] ?? ""}
@@ -144,20 +144,20 @@ export default function ClientsPage() {
                       <span>{client.firstName} {client.lastName ?? ""}</span>
                     </div>
                   </td>
-                  <td className="td-mono">{client.documentId}</td>
-                  <td>{client.phone}</td>
-                  <td className="td-secondary">{client.email ?? "—"}</td>
-                  <td>
+                  <td data-label="Documento" className="td-mono">{client.documentId}</td>
+                  <td data-label="Teléfono"><a href={`tel:${client.phone.replace(/[^+0-9]/g, "")}`} onClick={(e) => e.stopPropagation()}>{client.phone}</a></td>
+                  <td data-label="Email" className="td-secondary">{client.email ?? "—"}</td>
+                  <td data-label="Préstamos">
                     <span className={`loan-badge ${client._count.loans > 0 ? "has-loans" : ""}`}>
                       {client._count.loans}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="Estado">
                     <span className={`status-badge ${client.active ? "active" : "inactive"}`}>
                       {client.active ? "Activo" : "Inactivo"}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="Acciones">
                     <button
                       className="btn-edit"
                       onClick={(e) => {
@@ -631,6 +631,8 @@ function CreateClientModal({
               <label className="form-label" htmlFor="phone">Teléfono *</label>
               <input
                 id="phone"
+                type="tel"
+                autoComplete="tel"
                 className={`form-input ${fieldErrors.phone ? "input-error" : ""}`}
                 value={form.phone}
                 onChange={(e) => {
@@ -654,6 +656,8 @@ function CreateClientModal({
               <label className="form-label" htmlFor="email">Email</label>
               <input
                 id="email"
+                inputMode="email"
+                autoComplete="email"
                 className="form-input"
                 type="text"
                 value={form.email}
@@ -665,6 +669,7 @@ function CreateClientModal({
               <label className="form-label" htmlFor="address">Dirección</label>
               <input
                 id="address"
+                autoComplete="street-address"
                 className="form-input"
                 value={form.address}
                 onChange={(e) => updateField("address", e.target.value)}
