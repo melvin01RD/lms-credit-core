@@ -18,7 +18,10 @@
     "test:e2e:seguridad": "playwright test e2e/07-seguridad.spec.ts e2e/08-rbac.spec.ts --headed",
     "test:e2e:ci": "playwright test --reporter=github",
     "test:e2e:mobile": "playwright test --config playwright.mobile.config.ts",
-    "test:financial": "vitest run --config vitest.financial.config.ts"
+    "test:financial": "vitest run --config vitest.financial.config.ts",
+    "test:e2e:qa": "playwright test --config playwright.qa.config.ts",
+    "test:e2e:qa:ui": "playwright test --config playwright.qa.config.ts --ui",
+    "typecheck:e2e:qa": "tsc -p tsconfig.qa-e2e.json"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",

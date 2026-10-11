@@ -1,16 +1,17 @@
 import { Page } from '@playwright/test';
 
 export const ADMIN = {
-  email: 'melvin01rd@gmail.com',
-  password: 'Admin123',
+  email: process.env.ADMIN_EMAIL ?? '',
+  password: process.env.ADMIN_PASSWORD ?? '',
 };
 
 export const OPERATOR = {
-  email: 'operador.prueba@lmscredit.com',
-  password: 'Operador2024!',
+  email: process.env.OPERATOR_EMAIL ?? '',
+  password: process.env.OPERATOR_PASSWORD ?? '',
 };
 
 export async function login(page: Page, email: string, password: string) {
+  if (!email || !password) throw new Error('Configure las credenciales E2E mediante variables de entorno.');
   await page.goto('/login');
   await page.getByPlaceholder('usuario@ejemplo.com').fill(email);
   await page.getByPlaceholder('••••••••').fill(password);

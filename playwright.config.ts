@@ -9,6 +9,7 @@ if (!isLocalhost) throw new Error('Playwright requiere localhost para evitar ope
 
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: ['**/qa-auth.spec.ts', '**/financial-integrity.spec.ts'],
   timeout: 30_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
