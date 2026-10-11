@@ -42,7 +42,8 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts",
     ".next-login-qa/types/**/*.ts",
-    ".next-login-build/types/**/*.ts"
+    ".next-login-build/types/**/*.ts",
+    ".next-qa-e2e/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

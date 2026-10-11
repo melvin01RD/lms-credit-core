@@ -10,6 +10,7 @@ import {
 import { LoanStatus, PaymentFrequency, PaymentType, ScheduleStatus } from "@prisma/client";
 import { prismaMock } from "./prisma.mock";
 import { createMockPayment, createMockFlatRateLoan, createMockSchedule } from "./test-factories";
+import { financialFixture } from "./financial-fixture";
 
 // ============================================
 // calculateFlatRateDistribution — no pending entries
@@ -17,7 +18,7 @@ import { createMockPayment, createMockFlatRateLoan, createMockSchedule } from ".
 
 describe("calculateFlatRateDistribution - sin cuotas pendientes", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    financialFixture();
   });
 
   it("lanza error si no hay cuotas pendientes", async () => {
@@ -35,42 +36,15 @@ describe("calculateFlatRateDistribution - sin cuotas pendientes", () => {
 
 describe("createFlatRatePayment - monto insuficiente con mora", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    financialFixture();
   });
 
   it("lanza InvalidPaymentAmountError cuando pago cubre solo la mora pero no una cuota completa", async () => {
-    const flatLoan = createMockFlatRateLoan({
-      id: "loan-flat-late",
-      installmentAmount: 300,
-      remainingCapital: 13500,
-    });
-
-    const yesterday = new Date(Date.now() - 86400000);
-    const pendingEntries = [
-      {
-        id: "schedule-1",
-        loanId: "loan-flat-late",
-        installmentNumber: 1,
-        dueDate: yesterday,
-        expectedAmount: 300,
-        status: ScheduleStatus.OVERDUE,
-      },
-      {
-        id: "schedule-2",
-        loanId: "loan-flat-late",
-        installmentNumber: 2,
-        dueDate: new Date(Date.now() + 86400000),
-        expectedAmount: 300,
-        status: ScheduleStatus.PENDING,
-      },
-    ];
-
-    prismaMock.loan.findUnique.mockResolvedValue(flatLoan);
-    prismaMock.paymentSchedule.findMany.mockResolvedValue(pendingEntries);
+    financialFixture(2, true);
 
     await expect(
       createPayment({
-        loanId: "loan-flat-late",
+        loanId: "loan-1",
         totalAmount: 15,
         type: PaymentType.REGULAR,
         createdById: "user-1",

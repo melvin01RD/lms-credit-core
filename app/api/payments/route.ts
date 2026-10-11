@@ -29,7 +29,10 @@ export const GET = withAuth(async (req) => {
 });
 
 export const POST = withAuth(async (req) => {
-  const result = await createPayment(await readPaymentInput(req, req.session.userId));
+  const input = await readPaymentInput(req, req.session.userId);
+  const key = req.headers.get("Idempotency-Key");
+  if (key !== null) input.idempotencyKey = key;
+  const result = await createPayment(input);
 
   return NextResponse.json(result, { status: 201 });
 });

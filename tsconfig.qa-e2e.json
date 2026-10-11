@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["e2e/fixtures/auth.fixture.ts", "e2e/qa/**/*.ts", "e2e/setup/**/*.ts", "e2e/qa-auth.spec.ts", "e2e/financial-integrity.spec.ts", "playwright.qa.config.ts"],
+  "exclude": ["node_modules"]
+}

@@ -11,7 +11,7 @@
  * - Mora = cargo por cada cuota vencida no pagada en su fecha
  */
 
-import { PaymentFrequency } from "@prisma/client";
+import { PaymentFrequency, Prisma } from "@prisma/client";
 import { addDays, addWeeks, addMonths } from "date-fns";
 
 // ============================================
@@ -83,16 +83,23 @@ const LATE_FEE_RATE_PER_INSTALLMENT = 0.05; // 5% sobre el valor de la cuota ven
 export function calculateFlatRateLoan(input: FlatRateLoanInput): FlatRateLoanResult {
   const { principalAmount, totalFinanceCharge, termCount, paymentFrequency, startDate } = input;
 
+  if (![principalAmount, totalFinanceCharge].every(n => Number.isFinite(n) && new Prisma.Decimal(n).decimalPlaces() <= 2) ||
+      !Number.isInteger(termCount) || !Number.isFinite(startDate.getTime())) throw new Error("Parámetros financieros inválidos");
+
   if (principalAmount <= 0) throw new Error("El capital debe ser mayor a cero");
   if (totalFinanceCharge < 0) throw new Error("El cargo financiero no puede ser negativo");
   if (totalFinanceCharge > principalAmount) throw new Error("El cargo financiero no puede superar el monto del capital");
   if (termCount <= 0) throw new Error("El número de cuotas debe ser mayor a cero");
   if (termCount > 360) throw new Error("El número de cuotas no puede superar 360");
 
-  const totalPayableAmount = principalAmount + totalFinanceCharge;
-  const installmentAmount = Math.round((totalPayableAmount / termCount) * 100) / 100;
-  const principalPerInstallment = Math.round((principalAmount / termCount) * 100) / 100;
-  const interestPerInstallment = Math.round((totalFinanceCharge / termCount) * 100) / 100;
+  const principal = new Prisma.Decimal(principalAmount);
+  const total = principal.plus(totalFinanceCharge);
+  if (total.gt("9999999999.99")) throw new Error("El monto total excede el máximo permitido");
+  const totalPayableAmount = total.toNumber();
+  const installment = total.div(termCount).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  const installmentAmount = installment.toNumber();
+  const principalPerInstallment = principal.div(termCount).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP).toNumber();
+  const interestPerInstallment = new Prisma.Decimal(totalFinanceCharge).div(termCount).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP).toNumber();
   const effectiveRatePerTerm = (totalFinanceCharge / principalAmount) * 100;
 
   const schedule = generateFlatRateSchedule(
@@ -104,12 +111,18 @@ export function calculateFlatRateLoan(input: FlatRateLoanInput): FlatRateLoanRes
     startDate
   );
 
-  // Assign rounding residual to last installment so sum of all installments equals totalPayableAmount exactly
-  if (termCount > 1) {
-    const last = schedule[schedule.length - 1];
-    last.expectedAmount = Math.round((totalPayableAmount - installmentAmount * (termCount - 1)) * 100) / 100;
-    last.principalExpected = Math.round((principalAmount - principalPerInstallment * (termCount - 1)) * 100) / 100;
-    last.interestExpected = Math.round((totalFinanceCharge - interestPerInstallment * (termCount - 1)) * 100) / 100;
+  // Allocate exact cumulative principal; the final row absorbs all rounding residuals.
+  let accumulated = new Prisma.Decimal(0), principalAllocated = new Prisma.Decimal(0);
+  for (const [index, entry] of schedule.entries()) {
+    const expected = index === termCount - 1 ? total.minus(accumulated) : installment;
+    if (expected.lte(0)) throw new Error("El monto es insuficiente para generar cuotas positivas");
+    accumulated = accumulated.plus(expected);
+    const cumulativePrincipal = principal.mul(accumulated).div(total).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    const capital = cumulativePrincipal.minus(principalAllocated);
+    entry.expectedAmount = expected.toNumber();
+    entry.principalExpected = capital.toNumber();
+    entry.interestExpected = expected.minus(capital).toNumber();
+    principalAllocated = cumulativePrincipal;
   }
 
   return {
